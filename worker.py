@@ -1,0 +1,532 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+import random
+import re
+from dataclasses import dataclass
+from typing import Any, Final
+
+from playwright.async_api import (
+    Browser,
+    BrowserContext,
+    Page,
+    Playwright,
+    TimeoutError as PlaywrightTimeoutError,
+    async_playwright,
+)
+from playwright_stealth import Stealth
+
+CookieDict = dict[str, Any]
+CookieList = list[CookieDict]
+
+
+@dataclass(slots=True)
+class ProxyConfig:
+    host: str
+    port: int
+    user: str | None = None
+    password: str | None = None
+
+    def to_playwright_proxy(self) -> dict[str, str]:
+        proxy: dict[str, str] = {"server": f"http://{self.host}:{self.port}"}
+        if self.user:
+            proxy["username"] = self.user
+        if self.password:
+            proxy["password"] = self.password
+        return proxy
+
+
+@dataclass(slots=True)
+class AccountSessionData:
+    login: str
+    password: str
+    user_agent: str
+    cookies: CookieList | None = None
+    proxy: ProxyConfig | None = None
+
+
+class AccountCaptchaError(RuntimeError):
+    """Raised when Facebook blocks the session with a login wall/captcha."""
+
+
+class FacebookBrowser:
+    BASE_URL: Final[str] = "https://www.facebook.com/"
+    DEFAULT_TIMEOUT_MS: Final[int] = 60_000
+    LOGIN_TIMEOUT_MS: Final[int] = 120_000
+
+    PATTERNS = {
+        "LIKE": re.compile(r"\b(Нравится|Like|Beğen)\b", re.IGNORECASE),
+    }
+
+    def __init__(
+        self,
+        account: AccountSessionData,
+        headless: bool = True,
+        strict_cookie_session: bool = True,
+        log_callback: Any | None = None,
+    ) -> None:
+        self.account = account
+        self.headless = headless
+        self.strict_cookie_session = strict_cookie_session
+        self.log_callback = log_callback
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+        self._playwright: Playwright | None = None
+        self._browser: Browser | None = None
+        self._context: BrowserContext | None = None
+        self._page: Page | None = None
+
+    async def _log(self, message: str) -> None:
+        self.logger.info(message)
+        if self.log_callback:
+            await self.log_callback(message)
+
+    async def __aenter__(self) -> FacebookBrowser:
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
+        await self.close()
+
+    async def start(self) -> None:
+        launch_options: dict[str, Any] = {"headless": self.headless}
+        if self.account.proxy:
+            launch_options["proxy"] = self.account.proxy.to_playwright_proxy()
+
+        try:
+            self._playwright = await async_playwright().start()
+            self._browser = await self._playwright.chromium.launch(**launch_options)
+            
+            # Рандомизация параметров железа
+            cores = random.choice([4, 8, 12, 16])
+            ram = random.choice([4, 8, 16])
+
+            self._context = await self._browser.new_context(
+                user_agent=self.account.user_agent,
+                viewport={"width": random.choice([1366, 1440, 1536, 1920]), "height": random.choice([768, 864, 900, 1080])},
+                locale="tr-TR",
+                timezone_id="Europe/Istanbul",
+                java_script_enabled=True,
+                has_touch=False,
+                permissions=["notifications"], # Разрешаем/запрещаем как человек
+            )
+            self._page = await self._context.new_page()
+            self._page.set_default_timeout(self.DEFAULT_TIMEOUT_MS)
+
+            # ГЛУБОКИЙ ПАТЧИНГ (Deep Stealth)
+            await self._page.add_init_script(f"""
+                # Маскировка под реальное железо
+                Object.defineProperty(navigator, 'webdriver', {{get: () => undefined}});
+                Object.defineProperty(navigator, 'hardwareConcurrency', {{get: () => {cores}}});
+                Object.defineProperty(navigator, 'deviceMemory', {{get: () => {ram}}});
+                
+                # Патч WebGL (Видеокарта)
+                const getParameter = WebGLRenderingContext.prototype.getParameter;
+                WebGLRenderingContext.prototype.getParameter = function(parameter) {{
+                    if (parameter === 37445) return 'Intel Inc.';
+                    if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+                    return getParameter.call(this, parameter);
+                }};
+
+                # Маскировка плагинов
+                Object.defineProperty(navigator, 'plugins', {{get: () => [1, 2, 3, 4, 5]}});
+                Object.defineProperty(navigator, 'languages', {{get: () => ['tr-TR', 'tr', 'en-US', 'en']}});
+            """)
+
+            stealth = Stealth()
+            await stealth.apply_stealth_async(self._page)
+        except Exception as exc:
+            self.logger.exception("Не удалось запустить браузер.")
+            await self.close()
+            raise RuntimeError("Не удалось запустить FacebookBrowser.") from exc
+
+    @property
+    def page(self) -> Page:
+        if not self._page: raise RuntimeError("No page")
+        return self._page
+
+    async def close(self) -> None:
+        if self._context:
+            try: await self._context.close()
+            except: pass
+        if self._browser:
+            try: await self._browser.close()
+            except: pass
+        if self._playwright:
+            try: await self._playwright.stop()
+            except: pass
+
+    async def _human_click(self, locator: Any) -> None:
+        """Клик с физикой мыши и защитой от исчезновения элемента."""
+        try:
+            target = locator.first
+            if not await target.is_visible(timeout=3000):
+                return
+
+            await target.scroll_into_view_if_needed(timeout=3000)
+            await asyncio.sleep(random.uniform(0.5, 1.0))
+            
+            box = await target.bounding_box()
+            if not box:
+                await target.click(force=True, timeout=3000)
+                return
+
+            await self.page.mouse.move(
+                box['x'] + box['width']/2 + random.uniform(-3, 3),
+                box['y'] + box['height']/2 + random.uniform(-3, 3),
+                steps=random.randint(10, 20)
+            )
+            await asyncio.sleep(random.uniform(0.1, 0.3))
+            await self.page.mouse.click(
+                box['x'] + box['width']/2,
+                box['y'] + box['height']/2
+            )
+        except Exception as e:
+            self.logger.warning("Ошибка при human-клике: %s", e)
+            try:
+                await locator.first.click(force=True, timeout=2000)
+            except: pass
+
+    async def _pre_action_warmup(self) -> None:
+        await self._log("Прогрев сессии на главной...")
+        try:
+            await self.page.goto(self.BASE_URL, wait_until="domcontentloaded", timeout=self.DEFAULT_TIMEOUT_MS)
+            await asyncio.sleep(random.uniform(6.0, 12.0))
+            await self._close_dialogs()
+            # Человеческий скролл
+            for _ in range(random.randint(2, 4)):
+                await self.page.mouse.wheel(0, random.randint(200, 500))
+                await asyncio.sleep(random.uniform(1.0, 3.0))
+        except: pass
+
+    async def _post_action_simulation(self) -> None:
+        await self._log("Действие выполнено. Читаю ленту...")
+        try:
+            await asyncio.sleep(random.uniform(4.0, 8.0))
+            await self.page.mouse.wheel(0, random.randint(300, 600))
+            await asyncio.sleep(random.uniform(10.0, 20.0))
+        except: pass
+
+    async def login(self) -> CookieList:
+        if self.account.cookies:
+            await self._context.add_cookies(self.account.cookies)
+            if await self._is_authorized(): return await self._context.cookies()
+            await self._context.clear_cookies()
+
+        await self._log("Куки не подошли, вхожу по логину...")
+        await self.page.goto(self.BASE_URL, wait_until="domcontentloaded")
+        await asyncio.sleep(random.uniform(4, 8))
+        
+        # Человеческий ввод логина
+        email_field = self.page.locator('input[name="email"]')
+        await email_field.click()
+        await self.page.keyboard.type(self.account.login, delay=random.randint(100, 200))
+        
+        await asyncio.sleep(random.uniform(1.5, 3.5))
+        
+        # Человеческий ввод пароля
+        pass_field = self.page.locator('input[name="pass"]')
+        await pass_field.click()
+        await self.page.keyboard.type(self.account.password, delay=random.randint(100, 250))
+        
+        await asyncio.sleep(random.uniform(1.0, 2.5))
+        await self.page.keyboard.press("Enter")
+        
+        await asyncio.sleep(random.uniform(10, 20))
+        
+        # Проверка на капчу/ошибку
+        if "checkpoint" in self.page.url or await self.page.locator('form[action*="login"]').count() > 0:
+            await self._log("ВНИМАНИЕ: Facebook требует проверку (капча/пароль).")
+            raise AccountCaptchaError("Checkpoint detected during login.")
+
+        cookies = await self._context.cookies()
+        self.account.cookies = cookies
+        return cookies
+
+    async def _close_dialogs(self) -> None:
+        try:
+            selectors = ['div[role="dialog"] div[aria-label*="Close"]', 'button:has-text("Not Now")', 'button:has-text("Şimdi")', 'div[aria-label*="Kapat"]']
+            for sel in selectors:
+                loc = self.page.locator(sel).first
+                if await loc.is_visible(timeout=500): await loc.click(force=True)
+        except: pass
+
+    async def _wait_after_action(self, seconds: float = 20.0) -> None:
+        await asyncio.sleep(seconds)
+
+    async def _dismiss_action_blockers(self) -> None:
+        """Закрывает только блокирующие попапы, не трогая модалку поста."""
+        selectors = [
+            'button:has-text("Not Now")',
+            'button:has-text("Şimdi değil")',
+            'button:has-text("Şimdi Değil")',
+            'button:has-text("Şimdi")',
+        ]
+        for sel in selectors:
+            try:
+                loc = self.page.locator(sel).first
+                if await loc.is_visible(timeout=700):
+                    await loc.click(force=True)
+                    await asyncio.sleep(0.3)
+            except Exception:
+                continue
+
+    async def leave_comment(self, target_url: str, text: str) -> bool:
+        await self._pre_action_warmup()
+        await self._log(f"Переход к цели: {target_url}")
+        try:
+            await self.page.goto(target_url, wait_until="domcontentloaded", referer=self.BASE_URL)
+            await asyncio.sleep(random.uniform(12, 20))
+            await self._dismiss_action_blockers()
+        except: return False
+
+        input_selectors = [
+            'div[contenteditable="true"][role="textbox"][data-lexical-editor="true"]',
+            'div[data-lexical-editor="true"][role="textbox"]',
+            'div[role="textbox"][contenteditable="true"]',
+            'div[contenteditable="true"][role="textbox"]',
+            "form textarea",
+        ]
+
+        async def _find_comment_input() -> Any | None:
+            dialog_scoped_selectors = [f'div[role="dialog"] {sel}' for sel in input_selectors]
+            ordered_selectors = [*dialog_scoped_selectors, *input_selectors]
+            for sel in ordered_selectors:
+                try:
+                    loc = self.page.locator(sel).first
+                    if await loc.count() > 0:
+                        await self._log(f"Поле найдено по селектору: {sel}")
+                        return loc
+                except Exception:
+                    continue
+
+            for frame in self.page.frames:
+                if frame == self.page.main_frame:
+                    continue
+                for sel in input_selectors:
+                    try:
+                        loc = frame.locator(sel).first
+                        if await loc.count() > 0:
+                            await self._log("Поле комментария найдено внутри iframe.")
+                            return loc
+                    except Exception:
+                        continue
+            return None
+
+        input_field = await _find_comment_input()
+        if not input_field:
+            try:
+                post_dialog = self.page.locator('div[role="dialog"]').first
+                if await post_dialog.count() > 0 and await post_dialog.is_visible(timeout=1200):
+                    await self._log("Прокручиваю модалку поста до зоны комментариев...")
+                    await post_dialog.evaluate(
+                        """
+                        el => {
+                            const scrollers = [el, ...el.querySelectorAll('div')]
+                                .filter(node => node && node.scrollHeight > node.clientHeight);
+                            for (const node of scrollers) {
+                                node.scrollTop = node.scrollHeight;
+                            }
+                        }
+                        """
+                    )
+                    await asyncio.sleep(1.0)
+            except Exception:
+                pass
+            input_field = await _find_comment_input()
+
+        if not input_field:
+            await self._log("Поле скрыто, ищу кнопку активации...")
+            trig = self.page.locator('div[role="button"], span, div').filter(
+                has_text=re.compile(
+                    r"Yorum yaz|Yorum yap|Write a comment|Comment|Напишите",
+                    re.IGNORECASE,
+                )
+            ).first
+            try:
+                if await trig.is_visible(timeout=3000):
+                    await self._log("Активирую поле ввода кликом...")
+                    await self._human_click(trig)
+                    await asyncio.sleep(random.uniform(2.0, 4.0))
+            except Exception:
+                pass
+            input_field = await _find_comment_input()
+
+        if not input_field:
+            await self._log("Ошибка: Поле ввода не найдено.")
+            return False
+
+        await self._log("Поле найдено. Активирую...")
+        try:
+            await input_field.scroll_into_view_if_needed()
+            await input_field.wait_for(state="attached", timeout=5000)
+            await input_field.wait_for(state="visible", timeout=7000)
+            await input_field.evaluate(
+                """
+                el => {
+                    el.focus();
+                    el.dispatchEvent(new Event('focus', { bubbles: true }));
+                }
+                """
+            )
+            await asyncio.sleep(random.uniform(1.0, 2.0))
+
+            box = await input_field.bounding_box()
+            if box:
+                await self.page.mouse.click(box["x"] + 5, box["y"] + 5)
+
+            await asyncio.sleep(1.0)
+            await self.page.keyboard.press("Control+A")
+            await self.page.keyboard.press("Backspace")
+
+            await self._log("Начинаю печать текста...")
+            await self.page.keyboard.type(text, delay=random.randint(70, 150))
+            await asyncio.sleep(random.uniform(1.0, 2.0))
+
+            await self.page.keyboard.press("Enter")
+            await asyncio.sleep(1.0)
+
+            try:
+                still_has_text = bool(
+                    await input_field.evaluate(
+                        "el => (el.innerText || '').trim().length > 0"
+                    )
+                )
+            except Exception:
+                still_has_text = False
+
+            if still_has_text:
+                await self._log("Enter не отправил комментарий, пробую Control+Enter...")
+                await self.page.keyboard.press("Control+Enter")
+
+            await self._post_action_simulation()
+            return True
+        except Exception as e:
+            await self._log(f"Сбой при печати: {str(e)}")
+            return False
+
+    async def like_comment(self, target_url: str) -> bool:
+        await self._pre_action_warmup()
+        await self._log(f"Переход к цели: {target_url}")
+        try:
+            await self.page.goto(target_url, wait_until="domcontentloaded", referer=self.BASE_URL)
+            await asyncio.sleep(random.uniform(12, 20))
+            await self._dismiss_action_blockers()
+        except: return False
+
+        cid = re.search(r"comment_id=(\d+)", target_url)
+        cid = cid.group(1) if cid else None
+
+        async def _is_already_liked(button: Any) -> bool:
+            try:
+                label = (await button.get_attribute("aria-label") or "").lower()
+            except Exception:
+                label = ""
+            try:
+                text = (await button.inner_text() or "").lower()
+            except Exception:
+                text = ""
+            try:
+                pressed = (await button.get_attribute("aria-pressed") or "").lower()
+            except Exception:
+                pressed = ""
+            return (
+                "vazgeç" in label
+                or "unlike" in label
+                or "vazgeç" in text
+                or "unlike" in text
+                or pressed == "true"
+            )
+
+        async def _find_like_button() -> Any | None:
+            # 1) Пытаемся найти кнопку лайка внутри контейнера целевого комментария.
+            if cid:
+                try:
+                    comment_container = (
+                        self.page.locator('div[role="article"]')
+                        .filter(has=self.page.locator(f'a[href*="{cid}"]'))
+                        .filter(visible=True)
+                        .first
+                    )
+                    if await comment_container.is_visible(timeout=2500):
+                        by_text = (
+                            comment_container.locator('[role="button"], a')
+                            .filter(has_text=self.PATTERNS["LIKE"])
+                            .first
+                        )
+                        if await by_text.is_visible(timeout=1500):
+                            return by_text
+                except Exception:
+                    pass
+
+            # 2) Диалог поста (приоритетно) и глобальные fallback-селекторы.
+            like_selectors = [
+                'div[role="dialog"] [data-ad-rendering-role="like_button"]',
+                '[data-ad-rendering-role="like_button"]',
+                'div[role="dialog"] [role="button"]:has-text("Beğen")',
+                '[role="button"]:has-text("Beğen")',
+                'div[role="dialog"] [role="button"]:has-text("Like")',
+                '[role="button"]:has-text("Like")',
+                'div[role="dialog"] [role="button"]:has-text("Нравится")',
+                '[role="button"]:has-text("Нравится")',
+            ]
+            for selector in like_selectors:
+                try:
+                    candidate = self.page.locator(selector).first
+                    if await candidate.is_visible(timeout=2000):
+                        await self._log(f"Кнопка лайка найдена по селектору: {selector}")
+                        return candidate
+                except Exception:
+                    continue
+
+            # 3) iframe fallback.
+            for frame in self.page.frames:
+                if frame == self.page.main_frame:
+                    continue
+                for selector in like_selectors:
+                    try:
+                        candidate = frame.locator(selector).first
+                        if await candidate.is_visible(timeout=1500):
+                            await self._log("Кнопка лайка найдена внутри iframe.")
+                            return candidate
+                    except Exception:
+                        continue
+            return None
+
+        btn = await _find_like_button()
+        if btn and await _is_already_liked(btn):
+            await self._log("Пост уже лайкнут.")
+            return True
+
+        if btn:
+            await self._log("Нажимаю Лайк (Deep Stealth)...")
+            await self._human_click(btn)
+            await self._post_action_simulation()
+            return True
+        return False
+
+    async def reply_comment(self, target_url: str, text: str) -> bool:
+        return await self.leave_comment(target_url, text)
+
+    async def _is_authorized(self) -> bool:
+        try:
+            # Не переходим на главную если мы уже там
+            if self.page.url != self.BASE_URL:
+                await self.page.goto(self.BASE_URL, wait_until="domcontentloaded")
+            cookies = await self._context.cookies()
+            return any(cookie.get("name") == "c_user" for cookie in cookies)
+        except: return False
+
+    async def like_post(self, target_url: str) -> bool:
+        await self._pre_action_warmup()
+        try:
+            await self.page.goto(target_url, wait_until="domcontentloaded", referer=self.BASE_URL)
+            await asyncio.sleep(random.uniform(10, 18))
+            btn = self.page.get_by_role("button", name=self.PATTERNS["LIKE"], exact=True).filter(visible=True).first
+            if await btn.is_visible(timeout=5000):
+                await self._human_click(btn)
+                await self._post_action_simulation()
+                return True
+        except: pass
+        return False

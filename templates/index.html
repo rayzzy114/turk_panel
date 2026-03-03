@@ -1,0 +1,739 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TURKISH PANEL 🇹🇷</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      * {
+        font-family: 'JetBrains Mono', monospace !important;
+      }
+    </style>
+  </head>
+  <body class="bg-zinc-950 text-zinc-100 min-h-screen">
+    <div class="max-w-7xl mx-auto px-4 py-8">
+      <header class="flex flex-wrap items-center justify-between gap-4 mb-8">
+        <div class="flex items-center gap-3">
+          <span class="text-4xl drop-shadow-md">🇹🇷</span>
+          <h1 class="text-3xl font-black tracking-tight uppercase italic text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-sky-500">TURKISH PANEL</h1>
+        </div>
+        <div class="bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 shadow-lg shadow-emerald-900/10">
+          Баланс MoreThanPanel:
+          <span id="balance" class="font-bold text-emerald-400">загрузка...</span>
+        </div>
+      </header>
+
+
+      <section class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 mb-8 shadow-lg shadow-black/50">
+        <h2 class="text-lg font-semibold mb-4 text-zinc-100">Создать задачу</h2>
+        <form id="taskForm" class="grid md:grid-cols-2 gap-4">
+          <label class="block">
+            <span class="text-sm text-zinc-300 font-medium">URL</span>
+            <input id="url" class="mt-1 w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-shadow" required />
+          </label>
+          <label class="block">
+            <span class="text-sm text-zinc-300 font-medium">Действие</span>
+            <select id="actionType" class="mt-1 w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-shadow">
+              <option value="like_post">Лайк поста (MoreThanPanel)</option>
+              <option value="follow">Подписка (MoreThanPanel)</option>
+              <option value="comment_post">Комментарий поста (Bot)</option>
+              <option value="like_comment">Лайк комментария (MoreThanPanel)</option>
+              <option value="like_comment_bot">Лайк комментария (Bot)</option>
+              <option value="reply_comment">Ответ на комментарий (Bot)</option>
+            </select>
+          </label>
+          <label class="block md:col-span-2" id="textFieldWrap">
+            <span class="text-sm text-zinc-300 font-medium">Текст / Username</span>
+            <textarea id="payloadText" class="mt-1 w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-shadow" rows="3" placeholder="Для комментариев: каждый новый комментарий с новой строки.&#10;Для лайка комментария: введите username владельца."></textarea>
+          </label>
+          <label class="block">
+            <span class="text-sm text-zinc-300 font-medium">Количество <span class="text-zinc-500 font-normal">(для комментов — сколько аккаунтов взять)</span></span>
+            <input id="quantity" type="number" min="1" value="1" class="mt-1 w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-shadow" />
+          </label>
+
+          <label class="block">
+            <span class="text-sm text-zinc-300 font-medium">Пол аккаунта</span>
+            <select id="targetGender" class="mt-1 w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-shadow">
+              <option value="ANY">Любой</option>
+              <option value="M">Мужской</option>
+              <option value="F">Женский</option>
+            </select>
+          </label>
+          <label class="block">
+            <span class="text-sm text-zinc-300 font-medium">Аккаунт (опционально)</span>
+            <select id="manualAccount" class="mt-1 w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-shadow">
+              <option value="">Авто-подбор</option>
+            </select>
+          </label>
+          <div class="flex items-end">
+            <button class="bg-emerald-600 hover:bg-emerald-500 text-white rounded px-5 py-2.5 font-bold shadow-lg shadow-emerald-900/20 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 active:scale-[0.98] transition-all w-full md:w-auto" type="submit">
+              Создать
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 mb-8 shadow-lg shadow-black/50">
+        <h2 class="text-lg font-semibold mb-4 text-zinc-100">Парсер комментариев</h2>
+        <form id="parserForm" class="flex flex-col md:flex-row gap-3 mb-4">
+          <input
+            id="parserPostUrl"
+            class="flex-1 bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-shadow"
+            placeholder="URL поста"
+            required
+          />
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-zinc-400 font-medium uppercase tracking-wider">Кол-во:</span>
+            <input
+              id="parserLimit"
+              type="number"
+              min="1"
+              max="100"
+              value="10"
+              class="w-20 bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-center text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-shadow"
+              required
+            />
+          </div>
+          <button
+            id="parseCommentsBtn"
+            class="bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-60 disabled:cursor-not-allowed rounded px-5 py-2.5 font-bold shadow-lg shadow-sky-900/20 focus:outline-none focus:ring-2 focus:ring-sky-500/50 active:scale-[0.98] transition-all"
+            type="submit"
+          >
+            Спарсить
+          </button>
+        </form>
+        <div id="parserLoader" class="hidden mb-4 flex items-center gap-3 text-sm text-sky-400 font-medium">
+          <svg class="animate-spin h-5 w-5 text-sky-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          Загрузка комментариев через Apify (30-90 сек)...
+        </div>
+        <div class="overflow-auto max-h-[500px] border border-zinc-800 rounded-lg">
+          <table class="w-full text-sm">
+            <thead class="text-zinc-400 bg-zinc-950/50">
+              <tr>
+                <th class="text-left py-3 pl-4 font-semibold">Автор / Дата</th>
+                <th class="text-left py-3 font-semibold">Текст</th>
+                <th class="text-left py-3 font-semibold">Лайки</th>
+                <th class="text-left py-3 pr-4 font-semibold">Действие</th>
+              </tr>
+            </thead>
+            <tbody id="commentsTable">
+              <tr class="border-t border-zinc-800">
+                <td class="py-4 pl-4 text-zinc-500 italic" colspan="4">Результаты парсинга появятся здесь</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="parserWarning" class="mt-3 text-sm font-medium text-amber-400"></div>
+        <div class="mt-4">
+          <div class="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-2">Debug лог парсера</div>
+          <pre id="parserDebugLog" class="bg-zinc-950 border border-zinc-800 rounded-lg p-4 text-xs text-zinc-400 whitespace-pre-wrap shadow-inner">Ожидание запуска...</pre>
+        </div>
+      </section>
+
+      <section class="grid lg:grid-cols-2 gap-6 mb-8">
+        <div id="accountsDropZone" class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 shadow-lg shadow-black/50 relative transition-colors">
+          <input type="file" id="accountFileInput" multiple accept=".txt" class="hidden" />
+          <h2 class="text-lg font-semibold mb-4 flex items-center justify-between text-zinc-100">
+            <div class="flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg> Аккаунты
+            </div>
+            <button onclick="document.getElementById('accountFileInput').click()" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded shadow-md shadow-emerald-900/20 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 active:scale-[0.96] transition-all font-bold tracking-wider uppercase">Загрузить .txt</button>
+          </h2>
+          <div id="uploadOverlay" class="hidden absolute inset-0 bg-emerald-900/90 backdrop-blur-sm rounded-xl z-10 flex flex-col items-center justify-center border-2 border-dashed border-emerald-400">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-emerald-400 mb-2 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+            <span class="font-bold text-emerald-100 text-lg">Бросай файлы сюда!</span>
+          </div>
+          <div class="overflow-auto max-h-60 border border-zinc-800 rounded-lg">
+            <table class="w-full text-sm">
+              <thead class="text-zinc-400 bg-zinc-950/50">
+                <tr>
+                  <th class="text-left py-3 pl-4 font-semibold">ID</th>
+                  <th class="text-left py-3 font-semibold">Логин</th>
+                  <th class="text-left py-3 font-semibold">Прокси</th>
+                  <th class="text-left py-3 font-semibold">Статус</th>
+                  <th class="text-right py-3 pr-4 font-semibold"></th>
+                </tr>
+              </thead>
+              <tbody id="accountsTable"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 shadow-lg shadow-black/50">
+          <h2 class="text-lg font-semibold mb-4 flex items-center justify-between text-zinc-100">
+            <div class="flex items-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg> Прокси</div>
+            <div class="flex items-center gap-2">
+              <input id="proxySearch" oninput="filterProxies()" placeholder="Поиск (сессия/хост)" class="text-[10px] bg-zinc-950 border border-zinc-700 rounded px-2 py-1 focus:ring-1 focus:ring-emerald-500 outline-none w-32" />
+              <button onclick="document.getElementById('proxyModal').classList.remove('hidden')" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded shadow-md shadow-emerald-900/20 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 active:scale-[0.96] transition-all font-bold tracking-wider uppercase">Импорт</button>
+            </div>
+          </h2>
+          <div class="overflow-auto max-h-60 border border-zinc-800 rounded-lg">
+            <table class="w-full text-sm">
+              <thead class="text-zinc-400 bg-zinc-950/50">
+                <tr>
+                  <th class="text-left py-3 pl-4 font-semibold">ID</th>
+                  <th class="text-left py-3 font-semibold">Сессия / Хост</th>
+                  <th class="text-left py-3 font-semibold">Использует</th>
+                  <th class="text-left py-3 font-semibold">Статус</th>
+                  <th class="text-right py-3 pr-4 font-semibold"></th>
+                </tr>
+              </thead>
+              <tbody id="proxiesTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 overflow-auto shadow-lg shadow-black/50">
+        <h2 class="text-lg font-semibold mb-4 flex items-center justify-between text-zinc-100">
+          <div class="flex items-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg> Очередь задач</div>
+          <button onclick="clearTasks()" class="text-[10px] bg-red-950/30 hover:bg-red-900 text-red-400 hover:text-red-100 px-3 py-1.5 rounded border border-red-900/50 transition-all uppercase font-bold focus:outline-none focus:ring-2 focus:ring-red-500/50 active:scale-[0.96]">Очистить историю</button>
+        </h2>
+        <div class="border border-zinc-800 rounded-lg overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="text-zinc-400 bg-zinc-950/50">
+              <tr>
+                <th class="text-left py-3 pl-4 font-semibold">ID</th>
+                <th class="text-left py-3 font-semibold">Действие / Логи</th>
+                <th class="text-left py-3 font-semibold">Цель (URL)</th>
+                <th class="text-left py-3 font-semibold">Ext ID</th>
+                <th class="text-right py-3 pr-4 font-semibold">Статус</th>
+              </tr>
+            </thead>
+            <tbody id="tasksTable"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- Proxy Import Modal -->
+    <div id="proxyModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 max-w-lg w-full">
+        <h2 class="text-xl font-bold mb-4 uppercase">Импорт прокси</h2>
+        <p class="text-sm text-zinc-400 mb-4">Вставьте список в формате <code>Имя|host:port:user:pass</code> (по одному в строке, имя опционально)</p>
+        <textarea id="proxyData" class="w-full h-48 bg-zinc-950 border border-zinc-700 rounded p-3 text-sm font-mono mb-4" placeholder="Мобильные|1.2.3.4:8080:user:pass"></textarea>
+        <div class="flex justify-end gap-3">
+          <button onclick="document.getElementById('proxyModal').classList.add('hidden')" class="px-4 py-2 text-zinc-400 hover:text-white">Отмена</button>
+          <button id="importProxiesBtn" class="bg-emerald-600 hover:bg-emerald-500 px-6 py-2 rounded font-bold">Залить</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const taskForm = document.getElementById("taskForm");
+      const actionType = document.getElementById("actionType");
+      const targetGender = document.getElementById("targetGender");
+      const textFieldWrap = document.getElementById("textFieldWrap");
+      const payloadText = document.getElementById("payloadText");
+      const urlField = document.getElementById("url");
+      const parserForm = document.getElementById("parserForm");
+      const parserPostUrl = document.getElementById("parserPostUrl");
+      const parseCommentsBtn = document.getElementById("parseCommentsBtn");
+      const parserLoader = document.getElementById("parserLoader");
+      const commentsTable = document.getElementById("commentsTable");
+      const parserDebugLog = document.getElementById("parserDebugLog");
+      const parserWarning = document.getElementById("parserWarning");
+
+      function isApiAction(action) {
+        return action === "like_post" || action === "follow" || action === "like_comment_bot";
+      }
+
+      function toggleTextField() {
+        const hide = isApiAction(actionType.value);
+        textFieldWrap.style.display = hide ? "none" : "block";
+        if (hide) payloadText.value = "";
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function fillTaskFromComment(commentUrl, targetAction) {
+        if (!commentUrl) return;
+        urlField.value = commentUrl;
+        actionType.value = targetAction;
+        toggleTextField();
+        taskForm.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (targetAction === "reply_comment") {
+          setTimeout(() => payloadText.focus(), 250);
+        }
+      }
+
+      function renderParsedComments(comments) {
+        if (!Array.isArray(comments) || comments.length === 0) {
+          commentsTable.innerHTML = `
+            <tr class="border-t border-zinc-800 bg-zinc-900/20">
+              <td class="py-4 pl-4 text-zinc-500 italic" colspan="4">Комментарии не найдены</td>
+            </tr>`;
+          return;
+        }
+
+        commentsTable.innerHTML = comments
+          .map((comment, index) => {
+            const author = escapeHtml(comment.author || comment.username || "-");
+            const text = escapeHtml(comment.text || comment.comment_text || "-");
+            const commentUrl = escapeHtml(comment.comment_url || comment.url || "");
+            const dateStr = comment.date ? new Date(comment.date).toLocaleString("ru-RU") : "-";
+            const likesCount = comment.likes_count || 0;
+            return `
+              <tr class="comment-row border-t border-zinc-800 align-top cursor-pointer hover:bg-zinc-800 transition-colors"
+                  data-comment-url="${commentUrl}">
+                <td class="py-3 pl-4 pr-2">
+                  <div class="font-medium text-sky-400">${author}</div>
+                  <div class="text-[10px] text-zinc-500">${dateStr}</div>
+                </td>
+                <td class="py-3 pr-2 max-w-[480px] break-words">${text}</td>
+                <td class="py-3 pr-2 text-zinc-400 font-mono">${likesCount}</td>
+                <td class="py-3 pr-4 whitespace-nowrap text-right">
+                  <button
+                    type="button"
+                    class="bg-sky-700 hover:bg-sky-600 text-white rounded px-3 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500/50 active:scale-[0.96] transition-all shadow-md shadow-sky-900/20"
+                    data-comment-action="reply_comment"
+                    data-comment-url="${commentUrl}"
+                  >
+                    Выбрать
+                  </button>
+                </td>
+              </tr>`;
+          })
+          .join("");
+      }
+
+      function statusBadge(status) {
+        const base = "px-2 py-0.5 rounded-full font-bold text-[10px] uppercase tracking-wider border ";
+        if (status === "active" || status === "success") return base + "bg-emerald-950/40 text-emerald-400 border-emerald-900/50";
+        if (status === "error" || status === "banned") return base + "bg-red-950/40 text-red-400 border-red-900/50";
+        if (status === "limit" || status === "stopped") return base + "bg-yellow-950/40 text-yellow-400 border-yellow-900/50";
+        if (status === "checkpoint" || status === "in_progress") return base + "bg-amber-950/40 text-amber-400 border-amber-900/50";
+        return base + "bg-zinc-800/50 text-zinc-300 border-zinc-700";
+      }
+
+      let allProxies = [];
+
+      async function refreshProxies() {
+        const response = await fetch("/api/proxies");
+        allProxies = await response.json();
+        renderProxiesTable(allProxies);
+      }
+
+      async function deleteProxy(proxyId) {
+        if (!confirm(`Удалить прокси #${proxyId}?`)) return;
+        await fetch(`/api/proxies/${proxyId}`, { method: "DELETE" });
+        await refreshProxies();
+        await refreshAccounts();
+      }
+
+      async function toggleProxy(proxyId) {
+        await fetch(`/api/proxies/${proxyId}/toggle`, { method: "POST" });
+        await refreshProxies();
+      }
+
+      function renderProxiesTable(proxies) {
+        const table = document.getElementById("proxiesTable");
+        table.innerHTML = proxies
+          .map(
+            (p) => `
+            <tr class="border-t border-zinc-800 hover:bg-zinc-900/50 transition-colors">
+              <td class="py-2 pl-4 text-zinc-500 font-mono text-xs">${p.id}</td>
+              <td class="py-2 text-zinc-300 font-mono text-[10px]">
+                <div class="text-emerald-400 font-bold uppercase tracking-tight mb-1">${p.name || ""}</div>
+                <div class="text-sky-400 font-bold">${p.session_id || "-"}</div>
+                <div class="text-zinc-500">${p.host}:${p.port}</div>
+              </td>
+              <td class="py-2 text-zinc-400 text-xs italic">${p.in_use_by_account || "-"}</td>
+              <td class="py-2">
+                <button onclick="toggleProxy(${p.id})" title="Переключить статус" class="focus:outline-none active:scale-95 transition-all">
+                  <span class="${p.is_active ? 'text-emerald-400' : 'text-red-400'} text-[10px] uppercase font-bold tracking-tighter">
+                    ${p.is_active ? 'Online' : 'Offline'}
+                  </span>
+                </button>
+              </td>
+              <td class="py-2 pr-4 text-right">
+                <button onclick="deleteProxy(${p.id})" title="Удалить прокси" class="text-zinc-600 hover:text-red-400 focus:outline-none focus:text-red-400 active:scale-90 transition-all p-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </td>
+            </tr>`
+          )
+          .join("");
+      }
+
+      function filterProxies() {
+        const query = document.getElementById("proxySearch").value.toLowerCase();
+        const filtered = allProxies.filter(p => 
+          (p.name && p.name.toLowerCase().includes(query)) ||
+          (p.session_id && p.session_id.toLowerCase().includes(query)) || 
+          p.host.toLowerCase().includes(query)
+        );
+        renderProxiesTable(filtered);
+      }
+
+      async function banAccount(accId) {
+        if (!confirm(`Пометить аккаунт #${accId} как Banned (Сдох)?`)) return;
+        await fetch(`/api/accounts/${accId}/ban`, { method: "POST" });
+        await refreshAccounts();
+      }
+
+      async function updateAccountProxy(accId, proxyId) {
+        const payload = { proxy_id: proxyId ? Number(proxyId) : null };
+        try {
+          const response = await fetch(`/api/accounts/${accId}/proxy`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (!response.ok) {
+            const data = await response.json();
+            alert(data.detail || "Ошибка обновления прокси");
+          }
+          await refreshAccounts();
+        } catch (e) {
+          console.error(e);
+          alert("Ошибка сети");
+        }
+      }
+
+      async function refreshAccounts() {
+        const response = await fetch("/api/accounts");
+        const accounts = await response.json();
+        
+        const select = document.getElementById("manualAccount");
+        const currentVal = select.value;
+        select.innerHTML = '<option value="">Авто-подбор</option>' + 
+          accounts
+            .filter(a => a.status === 'active')
+            .map(a => `<option value="${a.id}">${a.login} (${a.gender})</option>`)
+            .join("");
+        select.value = currentVal;
+
+        const table = document.getElementById("accountsTable");
+        table.innerHTML = accounts
+          .map(
+            (a) => {
+              const proxyOptions = `<option value="">Без прокси</option>` + allProxies.map(p => {
+                const isBusyByOther = p.in_use_by_account && a.proxy_id !== p.id;
+                const sessionLabel = p.session_id ? ` [${p.session_id}]` : '';
+                const nameLabel = p.name ? ` (${p.name})` : '';
+                const label = `#${p.id}${nameLabel}${sessionLabel} ${p.host}:${p.port}${isBusyByOther ? ` (Занят: ${p.in_use_by_account})` : ''}`;
+                return `<option value="${p.id}" ${a.proxy_id === p.id ? 'selected' : ''} ${isBusyByOther ? 'disabled' : ''}>${label}</option>`;
+              }).join("");              
+              return `
+              <tr class="border-t border-zinc-800 hover:bg-zinc-900/50 transition-colors">
+                <td class="py-2 pl-4 text-zinc-500 font-mono text-xs">${a.id}</td>
+                <td class="py-2 text-zinc-200 font-semibold">${a.login}</td>
+                <td class="py-2">
+                  <select onchange="updateAccountProxy(${a.id}, this.value)" class="bg-zinc-950 border border-zinc-700 rounded px-1 py-1 text-[10px] text-zinc-300 w-40 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer">
+                    ${proxyOptions}
+                  </select>
+                </td>
+                <td class="py-2"><span class="${statusBadge(a.status)}">${a.status}</span></td>
+                <td class="py-2 pr-4 text-right">
+                  <div class="flex items-center justify-end gap-1">
+                    <button onclick="checkLogin(${a.id})" aria-label="Проверить вход" title="Проверить вход" class="text-zinc-600 hover:text-sky-400 focus:outline-none focus:text-sky-400 active:scale-90 transition-all p-1">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                      </svg>
+                    </button>
+                    <button onclick="banAccount(${a.id})" aria-label="Пометить как Banned" title="Пометить как Banned" class="text-zinc-600 hover:text-amber-500 focus:outline-none focus:text-amber-500 active:scale-90 transition-all p-1">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+                    </button>
+                    <button onclick="deleteAccount(${a.id})" aria-label="Удалить аккаунт" class="text-zinc-600 hover:text-red-400 focus:outline-none focus:text-red-400 active:scale-90 transition-all p-1">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                </td>
+              </tr>`
+            }
+          )
+          .join("");
+      }
+
+      async function refreshTasks() {
+        const response = await fetch("/api/tasks");
+        const tasks = await response.json();
+        const table = document.getElementById("tasksTable");
+        table.innerHTML = tasks
+          .map(
+            (t) => {
+              const logsHtml = t.logs && t.logs.length 
+                ? `<div class="mt-2 text-[10px] bg-black/40 rounded p-2 border border-zinc-800 max-h-24 overflow-y-auto font-mono">
+                    ${t.logs.map(l => `<div class="mb-1 border-b border-zinc-800/50 pb-1 last:border-0 last:pb-0">
+                      <span class="text-emerald-700/80 mr-1">${new Date(l.created_at).toLocaleTimeString()}</span> <span class="text-zinc-400">${escapeHtml(l.message)}</span>
+                    </div>`).join("")}
+                   </div>`
+                : "";
+
+              return `
+                <tr class="border-t border-zinc-800 align-top hover:bg-zinc-900/50 transition-colors">
+                  <td class="py-3 pl-4 pr-2 font-mono text-zinc-500 text-xs">${t.id}</td>
+                  <td class="py-3 pr-2">
+                    <div class="font-semibold text-emerald-500 text-[11px] uppercase tracking-widest">${t.action_type}</div>
+                    ${logsHtml}
+                  </td>
+                  <td class="py-3 pr-2 max-w-[150px] break-all text-xs text-zinc-400">
+                    <a href="${t.target_url}" target="_blank" class="hover:text-sky-400 underline decoration-zinc-700 transition-colors">${t.target_url}</a>
+                  </td>
+                  <td class="py-3 pr-2 text-zinc-500 font-mono text-[10px] italic">${t.external_order_id ?? "-"}</td>
+                  <td class="py-3 pr-4 text-right">
+                    <div class="flex flex-col items-end gap-1">
+                      <span class="${statusBadge(t.status)}">${t.status}</span>
+                      ${(t.status === 'pending' || t.status === 'in_progress') 
+                        ? `<button onclick="stopTask(${t.id})" aria-label="Остановить задачу" class="text-[10px] bg-red-950/40 hover:bg-red-900 text-red-300 px-2 py-0.5 rounded border border-red-900/50 focus:outline-none focus:ring-1 focus:ring-red-500 active:scale-95 transition-all uppercase tracking-wider font-bold">Стоп</button>` 
+                        : ''}
+                    </div>
+                  </td>
+                </tr>`
+            }
+          )
+          .join("");
+      }
+
+      async function refreshBalance() {
+
+        try {
+          const response = await fetch("/api/balance");
+          const data = await response.json();
+          const value = data.balance ? `${data.balance} ${data.currency || ""}` : "н/д";
+          document.getElementById("balance").textContent = value.trim();
+        } catch (error) {
+          document.getElementById("balance").textContent = "ошибка";
+        }
+      }
+
+      taskForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        
+        const submitBtn = taskForm.querySelector('button[type="submit"]');
+        const originalText = submitBtn.textContent;
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Создание...";
+        
+        const accountId = document.getElementById("manualAccount").value;
+        const payload = {
+          url: urlField.value,
+          action_type: actionType.value,
+          payload_text: payloadText.value || null,
+          quantity: Number(document.getElementById("quantity").value || 1),
+          target_gender: targetGender.value,
+          account_id: accountId ? Number(accountId) : null
+        };
+        try {
+          await fetch("/api/tasks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          // Optional: clear form on success
+          urlField.value = "";
+          payloadText.value = "";
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalText;
+          await refreshTasks();
+        }
+      });
+
+      parserForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const postUrl = parserPostUrl.value.trim();
+        const limit = Number(document.getElementById("parserLimit").value || 10);
+        if (!postUrl) return;
+
+        parseCommentsBtn.disabled = true;
+        parseCommentsBtn.textContent = "Парсим...";
+        parserLoader.classList.remove("hidden");
+
+        try {
+          const response = await fetch("/api/parse_comments", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: postUrl, limit: limit }),
+          });
+          const data = await response.json();
+          const comments = Array.isArray(data) ? data : data.comments;
+          const debugLines = Array.isArray(data?.debug) ? data.debug : [];
+          parserDebugLog.textContent = debugLines.length ? debugLines.join("\n") : "Debug пуст";
+          parserWarning.textContent = "";
+
+          if (data?.status === "error") {
+            const warning = data?.warning ? `[${data.warning}] ` : "";
+            parserWarning.textContent = `${warning}${data?.message || "Ошибка парсинга"}`;
+            renderParsedComments([]);
+            return;
+          }
+
+          renderParsedComments(comments);
+        } catch (error) {
+          parserDebugLog.textContent = "Ошибка при парсинге (см. серверные логи).";
+          parserWarning.textContent = "Не удалось получить ответ от сервера.";
+          commentsTable.innerHTML = `
+            <tr class="border-t border-zinc-800">
+              <td class="py-3 text-red-400" colspan="3">Ошибка парсинга</td>
+            </tr>`;
+        } finally {
+          parseCommentsBtn.disabled = false;
+          parseCommentsBtn.textContent = "Спарсить";
+          parserLoader.classList.add("hidden");
+        }
+      });
+
+      commentsTable.addEventListener("click", (event) => {
+        const row = event.target.closest(".comment-row");
+        if (!row) return;
+
+        // Удаляем подсветку у всех
+        document.querySelectorAll(".comment-row").forEach(r => r.classList.remove("bg-sky-950", "border-sky-500"));
+        // Добавляем подсветку текущему
+        row.classList.add("bg-sky-950", "border-sky-500");
+
+        const commentUrl = row.dataset.commentUrl || "";
+        fillTaskFromComment(commentUrl, "reply_comment");
+      });
+
+      document.getElementById("importProxiesBtn").addEventListener("click", async () => {
+        const rawData = document.getElementById("proxyData").value;
+        if (!rawData.trim()) return;
+
+        const btn = document.getElementById("importProxiesBtn");
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "Льем...";
+
+        try {
+          await fetch("/api/proxies/import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ raw_data: rawData }),
+          });
+
+          document.getElementById("proxyModal").classList.add("hidden");
+          document.getElementById("proxyData").value = "";
+          await refreshProxies();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
+      });
+
+      actionType.addEventListener("change", toggleTextField);
+      toggleTextField();
+
+      async function stopTask(taskId) {
+        if (!confirm(`Остановить задачу #${taskId}?`)) return;
+        await fetch(`/api/tasks/${taskId}/stop`, { method: "POST" });
+        await refreshTasks();
+      }
+
+      async function clearTasks() {
+        if (!confirm("Вы уверены, что хотите полностью очистить историю задач?")) return;
+        await fetch("/api/tasks/clear", { method: "POST" });
+        await refreshTasks();
+      }
+
+      async function deleteAccount(accId) {
+        if (!confirm(`Удалить аккаунт #${accId}? Это также удалит все связанные с ним задачи.`)) return;
+        await fetch(`/api/accounts/${accId}`, { method: "DELETE" });
+        await refreshAccounts();
+      }
+
+      async function checkLogin(accId) {
+        await fetch(`/api/accounts/${accId}/check_login`, { method: "POST" });
+        alert("Задача на проверку входа добавлена в очередь. Проверьте статус в таблице задач.");
+        await refreshTasks();
+      }
+
+      async function tick() {
+        await Promise.all([refreshAccounts(), refreshTasks(), refreshBalance(), refreshProxies()]);
+      }
+
+      // Drag and Drop Accounts Upload Logic
+      const dropZone = document.getElementById("accountsDropZone");
+      const fileInput = document.getElementById("accountFileInput");
+      const overlay = document.getElementById("uploadOverlay");
+
+      ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, preventDefaults, false);
+      });
+
+      function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+
+      ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, () => {
+          overlay.classList.remove("hidden");
+        }, false);
+      });
+
+      ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, () => {
+          overlay.classList.add("hidden");
+        }, false);
+      });
+
+      dropZone.addEventListener('drop', handleDrop, false);
+      fileInput.addEventListener('change', (e) => handleFiles(e.target.files), false);
+
+      function handleDrop(e) {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        handleFiles(files);
+      }
+
+      async function handleFiles(files) {
+        if (!files || files.length === 0) return;
+        
+        const validFiles = Array.from(files).filter(f => f.name.endsWith('.txt'));
+        if (validFiles.length === 0) {
+          alert("Пожалуйста, загружайте только .txt файлы с аккаунтами.");
+          return;
+        }
+
+        const formData = new FormData();
+        validFiles.forEach(file => {
+          formData.append("files", file);
+        });
+
+        try {
+          const response = await fetch("/api/accounts/upload", {
+            method: "POST",
+            body: formData
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            alert(`Импорт завершен!\nУспешно: ${data.imported}\nПропущено: ${data.skipped}`);
+            await refreshAccounts();
+          } else {
+            alert("Ошибка при загрузке файлов на сервер.");
+          }
+        } catch (error) {
+          console.error("Upload error:", error);
+          alert("Произошла критическая ошибка при загрузке.");
+        } finally {
+          fileInput.value = ""; // Reset input
+        }
+      }
+
+      tick();
+      setInterval(tick, 5000);
+    </script>
+  </body>
+</html>
