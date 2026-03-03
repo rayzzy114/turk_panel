@@ -158,9 +158,15 @@ class FakeKeyboard:
         self.pressed: list[str] = []
         self.typed: list[str] = []
         self.type_delays: list[int] = []
+        self.typed: list[str] = []
+        self.type_delays: list[int] = []
 
     async def press(self, key: str) -> None:
         self.pressed.append(key)
+        if len(key) == 1:
+            if not self.typed or self.pressed[-2:] == ["Enter", key]:
+                self.typed.append("")
+            self.typed[-1] += key
 
     async def type(self, value: str, delay: int | None = None) -> None:
         self.typed.append(value)

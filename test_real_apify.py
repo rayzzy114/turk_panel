@@ -1,4 +1,6 @@
 from __future__ import annotations
+import pytest
+import pytest
 import asyncio
 import logging
 import json
@@ -10,6 +12,7 @@ sys.path.append(str(Path(__file__).resolve().parent))
 from apify_api import ApifyAPI
 
 
+@pytest.mark.asyncio
 async def test_zuck_post_with_replies():
     logging.getLogger("httpx").setLevel(logging.WARNING)
 

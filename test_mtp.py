@@ -1,7 +1,9 @@
 import asyncio
+import pytest
 from mtp_api import MtpAPI
 
 
+@pytest.mark.asyncio
 async def test_mtp():
     api = MtpAPI()
     try:
