@@ -165,6 +165,7 @@ def _migrate_schema_if_needed(connection: Any) -> None:
 
     # Авто-миграции для новых полей (KISS)
     add_column_if_missing("proxies", "session_id", "TEXT")
+    add_column_if_missing("accounts", "storage_state", "JSON")
     add_column_if_missing("proxies", "name", "TEXT")
     add_column_if_missing("accounts", "gender", "TEXT DEFAULT 'ANY'")
     add_column_if_missing("accounts", "daily_actions_count", "INTEGER DEFAULT 0")
@@ -368,6 +369,16 @@ class ProxyImportIn(BaseModel):
 
 ACCOUNT_SELECTION_LOCK = asyncio.Lock()
 
+async def _save_account_state(browser, account, session) -> None:
+    state = await browser.get_storage_state()
+    if state:
+        account.storage_state = state
+        cookies = state.get("cookies", [])
+        if cookies:
+            account.cookies = cookies
+        await session.commit()
+
+
 
 async def _process_browser_task(session: Any, task: Task) -> bool:
     """Returns True if task finished (success/error/stopped), False if needs immediate retry."""
@@ -404,6 +415,7 @@ async def _process_browser_task(session: Any, task: Task) -> bool:
         password=account.password,
         user_agent=account.user_agent,
         cookies=account.cookies,
+        storage_state=account.storage_state,
         proxy=_proxy_from_account(account),
     )
     headless = _parse_bool(os.getenv("FB_HEADLESS"), default=True)
@@ -418,9 +430,8 @@ async def _process_browser_task(session: Any, task: Task) -> bool:
             account=session_data, headless=headless, strict_cookie_session=False,
             log_callback=worker_log
         ) as browser:
-            cookies = await browser.login()
-            account.cookies = cookies
-            await session.commit()
+            await browser.login()
+            await _save_account_state(browser, account, session)
             await _add_task_log(session, task.id, "Вход выполнен.")
 
             await session.refresh(task)
@@ -475,6 +486,7 @@ async def _process_browser_task(session: Any, task: Task) -> bool:
             session, task.id, f"Завершено: {'Успех' if ok else 'Ошибка'}"
         )
         if ok:
+            await _save_account_state(browser, account, session)
             _mark_account_action_success(account)
         return True
 

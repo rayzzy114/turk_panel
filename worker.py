@@ -7,15 +7,11 @@ import re
 from dataclasses import dataclass
 from typing import Any, Final
 
+from camoufox.async_api import AsyncCamoufox
 from playwright.async_api import (
-    Browser,
-    BrowserContext,
     Page,
-    Playwright,
-    TimeoutError as PlaywrightTimeoutError,
-    async_playwright,
+
 )
-from playwright_stealth import Stealth
 
 CookieDict = dict[str, Any]
 CookieList = list[CookieDict]
@@ -43,6 +39,7 @@ class AccountSessionData:
     password: str
     user_agent: str
     cookies: CookieList | None = None
+    storage_state: dict[str, Any] | None = None
     proxy: ProxyConfig | None = None
 
 
@@ -72,10 +69,12 @@ class FacebookBrowser:
         self.log_callback = log_callback
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        self._playwright: Playwright | None = None
-        self._browser: Browser | None = None
-        self._context: BrowserContext | None = None
-        self._page: Page | None = None
+        self._playwright = None
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._camoufox = None
+
 
     async def _log(self, message: str) -> None:
         self.logger.info(message)
@@ -90,52 +89,40 @@ class FacebookBrowser:
         await self.close()
 
     async def start(self) -> None:
-        launch_options: dict[str, Any] = {"headless": self.headless}
-        if self.account.proxy:
-            launch_options["proxy"] = self.account.proxy.to_playwright_proxy()
-
         try:
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(**launch_options)
-            
-            # Рандомизация параметров железа
-            cores = random.choice([4, 8, 12, 16])
-            ram = random.choice([4, 8, 16])
+            proxy_str = None
+            if self.account.proxy:
+                host = self.account.proxy.host
+                port = self.account.proxy.port
+                user = self.account.proxy.user
+                pwd = self.account.proxy.password
+                if user and pwd:
+                    proxy_str = f"http://{user}:{pwd}@{host}:{port}"
+                else:
+                    proxy_str = f"http://{host}:{port}"
+
+            self._camoufox = AsyncCamoufox(
+                headless=self.headless,
+                proxy=proxy_str,
+                # Camoufox takes care of stealth without patching
+            )
+            self._browser = await self._camoufox.__aenter__()
+
+            # Restore storage state if we have it
+            context_kwargs = {}
+            if self.account.storage_state:
+                context_kwargs["storage_state"] = self.account.storage_state
 
             self._context = await self._browser.new_context(
-                user_agent=self.account.user_agent,
-                viewport={"width": random.choice([1366, 1440, 1536, 1920]), "height": random.choice([768, 864, 900, 1080])},
                 locale="tr-TR",
                 timezone_id="Europe/Istanbul",
-                java_script_enabled=True,
-                has_touch=False,
                 permissions=["notifications"], # Разрешаем/запрещаем как человек
+                **context_kwargs
             )
+
             self._page = await self._context.new_page()
             self._page.set_default_timeout(self.DEFAULT_TIMEOUT_MS)
 
-            # ГЛУБОКИЙ ПАТЧИНГ (Deep Stealth)
-            await self._page.add_init_script(f"""
-                # Маскировка под реальное железо
-                Object.defineProperty(navigator, 'webdriver', {{get: () => undefined}});
-                Object.defineProperty(navigator, 'hardwareConcurrency', {{get: () => {cores}}});
-                Object.defineProperty(navigator, 'deviceMemory', {{get: () => {ram}}});
-                
-                # Патч WebGL (Видеокарта)
-                const getParameter = WebGLRenderingContext.prototype.getParameter;
-                WebGLRenderingContext.prototype.getParameter = function(parameter) {{
-                    if (parameter === 37445) return 'Intel Inc.';
-                    if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-                    return getParameter.call(this, parameter);
-                }};
-
-                # Маскировка плагинов
-                Object.defineProperty(navigator, 'plugins', {{get: () => [1, 2, 3, 4, 5]}});
-                Object.defineProperty(navigator, 'languages', {{get: () => ['tr-TR', 'tr', 'en-US', 'en']}});
-            """)
-
-            stealth = Stealth()
-            await stealth.apply_stealth_async(self._page)
         except Exception as exc:
             self.logger.exception("Не удалось запустить браузер.")
             await self.close()
@@ -143,19 +130,45 @@ class FacebookBrowser:
 
     @property
     def page(self) -> Page:
-        if not self._page: raise RuntimeError("No page")
+        if not self._page:
+            raise RuntimeError("No page")
         return self._page
+
+    async def get_storage_state(self) -> dict | None:
+        if self._context:
+            return await self._context.storage_state()
+        return None
 
     async def close(self) -> None:
         if self._context:
-            try: await self._context.close()
-            except: pass
-        if self._browser:
-            try: await self._browser.close()
-            except: pass
-        if self._playwright:
-            try: await self._playwright.stop()
-            except: pass
+            try:
+                await self._context.close()
+            except Exception:
+                pass
+        if self._camoufox:
+            try:
+                await self._camoufox.__aexit__(None, None, None)
+            except Exception:
+                pass
+
+    async def _human_type(self, text: str) -> None:
+        """Эмуляция человеческого набора текста: разные задержки, микропаузы."""
+        for char in text:
+            await self.page.keyboard.press(char)
+            # Базовая задержка
+            delay = random.uniform(0.05, 0.15)
+            # Иногда делаем "микропаузу" (человек задумался)
+            if random.random() < 0.05:
+                delay += random.uniform(0.5, 1.5)
+            await asyncio.sleep(delay)
+
+    async def _human_scroll(self, distance: int) -> None:
+        """Нелинейный скроллинг мыши"""
+        steps = random.randint(3, 8)
+        step_distance = distance / steps
+        for _ in range(steps):
+            await self.page.mouse.wheel(0, step_distance + random.uniform(-20, 20))
+            await asyncio.sleep(random.uniform(0.1, 0.4))
 
     async def _human_click(self, locator: Any) -> None:
         """Клик с физикой мыши и защитой от исчезновения элемента."""
@@ -186,7 +199,8 @@ class FacebookBrowser:
             self.logger.warning("Ошибка при human-клике: %s", e)
             try:
                 await locator.first.click(force=True, timeout=2000)
-            except: pass
+            except Exception:
+                pass
 
     async def _pre_action_warmup(self) -> None:
         await self._log("Прогрев сессии на главной...")
@@ -196,39 +210,48 @@ class FacebookBrowser:
             await self._close_dialogs()
             # Человеческий скролл
             for _ in range(random.randint(2, 4)):
-                await self.page.mouse.wheel(0, random.randint(200, 500))
+                await self._human_scroll(random.randint(200, 500))
                 await asyncio.sleep(random.uniform(1.0, 3.0))
-        except: pass
+        except Exception:
+                pass
 
     async def _post_action_simulation(self) -> None:
         await self._log("Действие выполнено. Читаю ленту...")
         try:
             await asyncio.sleep(random.uniform(4.0, 8.0))
-            await self.page.mouse.wheel(0, random.randint(300, 600))
+            await self._human_scroll(random.randint(300, 600))
             await asyncio.sleep(random.uniform(10.0, 20.0))
-        except: pass
+        except Exception:
+                pass
 
-    async def login(self) -> CookieList:
-        if self.account.cookies:
+    async def login(self) -> None:
+        if await self._is_authorized():
+            await self._log("Авторизация успешна (storage_state/cookies активны).")
+            return
+
+        if self.account.cookies and not self.account.storage_state:
+            await self._log("Имеются только куки, пробую авторизоваться через них...")
             await self._context.add_cookies(self.account.cookies)
-            if await self._is_authorized(): return await self._context.cookies()
+            if await self._is_authorized():
+                await self._log("Авторизация по кукам успешна.")
+                return
             await self._context.clear_cookies()
 
-        await self._log("Куки не подошли, вхожу по логину...")
+        await self._log("Сессия не найдена, вхожу по логину...")
         await self.page.goto(self.BASE_URL, wait_until="domcontentloaded")
         await asyncio.sleep(random.uniform(4, 8))
         
         # Человеческий ввод логина
-        email_field = self.page.locator('input[name="email"]')
+        email_field = self.page.locator("input[name=\"email\"]")
         await email_field.click()
-        await self.page.keyboard.type(self.account.login, delay=random.randint(100, 200))
+        await self._human_type(self.account.login)
         
         await asyncio.sleep(random.uniform(1.5, 3.5))
         
         # Человеческий ввод пароля
-        pass_field = self.page.locator('input[name="pass"]')
+        pass_field = self.page.locator("input[name=\"pass\"]")
         await pass_field.click()
-        await self.page.keyboard.type(self.account.password, delay=random.randint(100, 250))
+        await self._human_type(self.account.password)
         
         await asyncio.sleep(random.uniform(1.0, 2.5))
         await self.page.keyboard.press("Enter")
@@ -236,21 +259,24 @@ class FacebookBrowser:
         await asyncio.sleep(random.uniform(10, 20))
         
         # Проверка на капчу/ошибку
-        if "checkpoint" in self.page.url or await self.page.locator('form[action*="login"]').count() > 0:
+        if "checkpoint" in self.page.url or await self.page.locator("form[action*=\"login\"]").count() > 0:
             await self._log("ВНИМАНИЕ: Facebook требует проверку (капча/пароль).")
             raise AccountCaptchaError("Checkpoint detected during login.")
 
-        cookies = await self._context.cookies()
-        self.account.cookies = cookies
-        return cookies
+        if not await self._is_authorized():
+            raise AccountCaptchaError("Не удалось авторизоваться после ввода логина/пароля.")
+
+        await self._log("Успешный вход по логину и паролю.")
 
     async def _close_dialogs(self) -> None:
         try:
             selectors = ['div[role="dialog"] div[aria-label*="Close"]', 'button:has-text("Not Now")', 'button:has-text("Şimdi")', 'div[aria-label*="Kapat"]']
             for sel in selectors:
                 loc = self.page.locator(sel).first
-                if await loc.is_visible(timeout=500): await loc.click(force=True)
-        except: pass
+                if await loc.is_visible(timeout=500):
+                    await loc.click(force=True)
+        except Exception:
+                pass
 
     async def _wait_after_action(self, seconds: float = 20.0) -> None:
         await asyncio.sleep(seconds)
@@ -279,7 +305,8 @@ class FacebookBrowser:
             await self.page.goto(target_url, wait_until="domcontentloaded", referer=self.BASE_URL)
             await asyncio.sleep(random.uniform(12, 20))
             await self._dismiss_action_blockers()
-        except: return False
+        except Exception:
+            return False
 
         input_selectors = [
             'div[contenteditable="true"][role="textbox"][data-lexical-editor="true"]',
@@ -381,7 +408,7 @@ class FacebookBrowser:
             await self.page.keyboard.press("Backspace")
 
             await self._log("Начинаю печать текста...")
-            await self.page.keyboard.type(text, delay=random.randint(70, 150))
+            await self._human_type(text)
             await asyncio.sleep(random.uniform(1.0, 2.0))
 
             await self.page.keyboard.press("Enter")
@@ -413,7 +440,8 @@ class FacebookBrowser:
             await self.page.goto(target_url, wait_until="domcontentloaded", referer=self.BASE_URL)
             await asyncio.sleep(random.uniform(12, 20))
             await self._dismiss_action_blockers()
-        except: return False
+        except Exception:
+            return False
 
         cid = re.search(r"comment_id=(\d+)", target_url)
         cid = cid.group(1) if cid else None
@@ -516,7 +544,8 @@ class FacebookBrowser:
                 await self.page.goto(self.BASE_URL, wait_until="domcontentloaded")
             cookies = await self._context.cookies()
             return any(cookie.get("name") == "c_user" for cookie in cookies)
-        except: return False
+        except Exception:
+            return False
 
     async def like_post(self, target_url: str) -> bool:
         await self._pre_action_warmup()
@@ -528,5 +557,6 @@ class FacebookBrowser:
                 await self._human_click(btn)
                 await self._post_action_simulation()
                 return True
-        except: pass
+        except Exception:
+                pass
         return False

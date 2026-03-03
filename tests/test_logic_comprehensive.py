@@ -96,13 +96,13 @@ async def test_gender_filtering_selection(setup_db):
         session.add_all([m, f])
         await session.commit()
 
-        sel_m = await api_module._get_active_account(session, target_gender="M")
+        sel_m = await api_module._get_active_account(session, target_url="http://fb.com", target_gender="M")
         assert sel_m.login == "male"
 
-        sel_f = await api_module._get_active_account(session, target_gender="F")
+        sel_f = await api_module._get_active_account(session, target_url="http://fb.com", target_gender="F")
         assert sel_f.login == "female"
 
-        sel_any = await api_module._get_active_account(session, target_gender="ANY")
+        sel_any = await api_module._get_active_account(session, target_url="http://fb.com", target_gender="ANY")
         assert sel_any.login in ["male", "female"]
 
 

@@ -73,6 +73,7 @@ class Account(Base):
     login: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     password: Mapped[str] = mapped_column(String(255), nullable=False)
     cookies: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    storage_state: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     proxy_id: Mapped[int | None] = mapped_column(
         ForeignKey("proxies.id", ondelete="SET NULL"), nullable=True
     )
