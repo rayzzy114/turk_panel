@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 from dotenv import load_dotenv
-from sqlalchemy import or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import selectinload
 
@@ -47,6 +47,8 @@ class TaskCreate(BaseModel):
     quantity: int = Field(default=1, ge=1, le=100_000)
     target_gender: Literal["M", "F", "ANY"] = "ANY"
     account_id: int | None = None
+    target_author_id: str | None = None
+    target_author_name: str | None = None
 
 
 class LogOut(BaseModel):
@@ -63,6 +65,8 @@ class TaskOut(BaseModel):
     action_type: TaskActionType
     target_url: str
     payload_text: str | None
+    target_author_id: str | None
+    target_author_name: str | None
     external_order_id: int | None
     target_gender: str
     status: TaskStatus
@@ -110,6 +114,24 @@ def _normalize_gender(value: str | None) -> str:
     if candidate not in ALLOWED_GENDERS:
         raise ValueError(f"Некорректный gender: {value}")
     return candidate
+
+
+def _normalize_target_author_id(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalized
+
+
+def _normalize_target_author_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalized
 
 
 def _is_account_daily_limited(account: Account, today: date | None = None) -> bool:
@@ -172,6 +194,8 @@ def _migrate_schema_if_needed(connection: Any) -> None:
     add_column_if_missing("accounts", "last_action_date", "DATE")
     add_column_if_missing("tasks", "external_order_id", "INTEGER")
     add_column_if_missing("tasks", "target_gender", "TEXT DEFAULT 'ANY'")
+    add_column_if_missing("tasks", "target_author_id", "TEXT")
+    add_column_if_missing("tasks", "target_author_name", "TEXT")
 
     # Приведение данных к правильным значениям Enum (имена членов - верхний регистр)
     connection.exec_driver_sql(
@@ -219,8 +243,18 @@ app = FastAPI(
 )
 
 
-async def _get_active_account(session: Any, target_url: str, target_gender: str = "ANY") -> Account:
+async def _get_active_account(
+    session: Any,
+    target_url: str,
+    target_gender: str = "ANY",
+    action_type: TaskActionType | None = None,
+    target_author_id: str | None = None,
+) -> Account:
     normalized_target_gender = _normalize_gender(target_gender)
+    normalized_author = _normalize_target_author_id(target_author_id)
+    normalized_target_author_id = (
+        normalized_author.lower() if normalized_author is not None else None
+    )
     today = date.today()
 
     # 1. Находим ID аккаунтов, которые сейчас заняты любыми браузерными задачами
@@ -230,11 +264,15 @@ async def _get_active_account(session: Any, target_url: str, target_gender: str 
     busy_account_ids = (await session.execute(busy_accounts_stmt)).scalars().all()
 
     # 2. Исключаем тех, кто УЖЕ назначен на задачи по этому же URL (PENDING или SUCCESS)
+    # ERROR intentionally is not in this list: failed task means action not completed.
     already_assigned_stmt = select(Task.account_id).where(
         Task.target_url == target_url,
         Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.SUCCESS]),
         Task.account_id.is_not(None)
     )
+    if action_type is not None:
+        # Different actions on same URL should not block each other (reply vs like_comment_bot).
+        already_assigned_stmt = already_assigned_stmt.where(Task.action_type == action_type)
     already_assigned_ids = (await session.execute(already_assigned_stmt)).scalars().all()
 
     stmt = (
@@ -258,6 +296,11 @@ async def _get_active_account(session: Any, target_url: str, target_gender: str 
     )
     if normalized_target_gender != "ANY":
         stmt = stmt.where(Account.gender == normalized_target_gender)
+    if (
+        action_type == TaskActionType.REPLY_COMMENT
+        and normalized_target_author_id is not None
+    ):
+        stmt = stmt.where(func.lower(Account.login) != normalized_target_author_id)
 
     # 4. Приоритет LRU
     stmt = stmt.order_by(
@@ -297,7 +340,11 @@ async def _rotate_account_proxy(session: Any, account: Account) -> None:
 async def _block_account_due_to_captcha(
     session: Any, account: Account, *, reason: str | Exception
 ) -> None:
-    account.status = AccountStatus.CAPTCHA_BLOCKED
+    reason_text = str(reason).lower()
+    if "checkpoint" in reason_text:
+        account.status = AccountStatus.CHECKPOINT
+    else:
+        account.status = AccountStatus.CAPTCHA_BLOCKED
     try:
         await _rotate_account_proxy(session, account)
     except Exception as e:
@@ -367,6 +414,10 @@ class ProxyImportIn(BaseModel):
     raw_data: str  # Bulk host:port:user:pass lines
 
 
+class BulkDeleteIn(BaseModel):
+    ids: list[int] = Field(default_factory=list)
+
+
 ACCOUNT_SELECTION_LOCK = asyncio.Lock()
 
 async def _save_account_state(browser, account, session) -> None:
@@ -395,7 +446,11 @@ async def _process_browser_task(session: Any, task: Task) -> bool:
                     return True
 
                 account = await _get_active_account(
-                    session, task.target_url, task.target_gender
+                    session,
+                    task.target_url,
+                    task.target_gender,
+                    action_type=task.action_type,
+                    target_author_id=task.target_author_id,
                 )
                 task.account_id = account.id
                 await session.commit()
@@ -477,6 +532,9 @@ async def _process_browser_task(session: Any, task: Task) -> bool:
                     if not ok:
                         await _add_task_log(session, task.id, "Ошибка: Не удалось оставить комментарий.")
 
+                if ok:
+                    await _save_account_state(browser, account, session)
+
         await session.refresh(task)
         if task.status == TaskStatus.STOPPED:
             return True
@@ -486,13 +544,18 @@ async def _process_browser_task(session: Any, task: Task) -> bool:
             session, task.id, f"Завершено: {'Успех' if ok else 'Ошибка'}"
         )
         if ok:
-            await _save_account_state(browser, account, session)
             _mark_account_action_success(account)
         return True
 
     except AccountCaptchaError as exc:
         await _block_account_due_to_captcha(session, account, reason=str(exc))
         task.account_id = None  # Освобождаем задачу для другого аккаунта
+        if "checkpoint" in str(exc).lower():
+            await _add_task_log(
+                session,
+                task.id,
+                f"CHECKPOINT: аккаунт {account.login} отправлен на проверку Facebook.",
+            )
         await _add_task_log(
             session, task.id, f"АККАУНТ {account.login} ВЫЛЕТЕЛ: {exc}. Ищу замену..."
         )
@@ -700,6 +763,19 @@ class ProxyUpdateIn(BaseModel):
     proxy_id: int | None
 
 
+def _unique_positive_ids(ids: list[int]) -> list[int]:
+    seen: set[int] = set()
+    result: list[int] = []
+    for item in ids:
+        if item <= 0:
+            continue
+        if item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
+
+
 @app.put("/api/accounts/{account_id}/proxy")
 async def update_account_proxy(
     account_id: int, payload: ProxyUpdateIn
@@ -733,6 +809,46 @@ async def update_account_proxy(
         session.add(account)
         await session.commit()
     return {"status": "success"}
+
+
+@app.post("/api/accounts/bulk_delete")
+async def bulk_delete_accounts(payload: BulkDeleteIn) -> dict[str, Any]:
+    normalized_ids = _unique_positive_ids(payload.ids)
+    if not normalized_ids:
+        raise HTTPException(status_code=400, detail="Список ids пуст")
+
+    await _ensure_tables()
+    async with SessionLocal() as session:
+        existing_ids = (
+            await session.execute(select(Account.id).where(Account.id.in_(normalized_ids)))
+        ).scalars().all()
+        existing_id_set = set(existing_ids)
+        if existing_id_set:
+            await session.execute(delete(Account).where(Account.id.in_(list(existing_id_set))))
+            await session.commit()
+
+    not_found = [item for item in normalized_ids if item not in existing_id_set]
+    return {"status": "success", "deleted": len(existing_id_set), "not_found": not_found}
+
+
+@app.post("/api/proxies/bulk_delete")
+async def bulk_delete_proxies(payload: BulkDeleteIn) -> dict[str, Any]:
+    normalized_ids = _unique_positive_ids(payload.ids)
+    if not normalized_ids:
+        raise HTTPException(status_code=400, detail="Список ids пуст")
+
+    await _ensure_tables()
+    async with SessionLocal() as session:
+        existing_ids = (
+            await session.execute(select(Proxy.id).where(Proxy.id.in_(normalized_ids)))
+        ).scalars().all()
+        existing_id_set = set(existing_ids)
+        if existing_id_set:
+            await session.execute(delete(Proxy).where(Proxy.id.in_(list(existing_id_set))))
+            await session.commit()
+
+    not_found = [item for item in normalized_ids if item not in existing_id_set]
+    return {"status": "success", "deleted": len(existing_id_set), "not_found": not_found}
 
 
 @app.post("/api/accounts/{account_id}/ban")
@@ -847,6 +963,11 @@ async def create_task(payload: TaskCreate) -> TaskOut | list[TaskOut]:
         TaskActionType.LIKE_COMMENT,
     }
     target_gender = _normalize_gender(payload.target_gender)
+    target_author_id = _normalize_target_author_id(payload.target_author_id)
+    target_author_name = _normalize_target_author_name(payload.target_author_name)
+    if payload.action_type != TaskActionType.REPLY_COMMENT:
+        target_author_id = None
+        target_author_name = None
 
     tasks_to_return = []
 
@@ -893,12 +1014,31 @@ async def create_task(payload: TaskCreate) -> TaskOut | list[TaskOut]:
                 # чтобы они не улетели с одного аккаунта.
                 # Если же задача одна, используем выбранный вручную (если есть).
                 assigned_account_id = payload.account_id if payload.quantity == 1 else None
+                if (
+                    payload.action_type == TaskActionType.REPLY_COMMENT
+                    and assigned_account_id is not None
+                    and target_author_id is not None
+                ):
+                    manual_account = await session.scalar(
+                        select(Account).where(Account.id == assigned_account_id)
+                    )
+                    if (
+                        manual_account is not None
+                        and manual_account.login.strip().lower()
+                        == target_author_id.lower()
+                    ):
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Нельзя назначить аккаунт-автора комментария на reply.",
+                        )
 
                 task = Task(
                     account_id=assigned_account_id,
                     action_type=payload.action_type,
                     target_url=payload.url,
                     payload_text=current_text,
+                    target_author_id=target_author_id,
+                    target_author_name=target_author_name,
                     target_gender=target_gender,
                     status=TaskStatus.PENDING,
                 )

@@ -6,8 +6,9 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from models import Base, Account, AccountStatus, Proxy, Task, TaskStatus, TaskActionType
+from models import Base, Account, AccountStatus, Log, Proxy, Task, TaskStatus, TaskActionType
 import api as api_module
 import importlib
 from pathlib import Path
@@ -308,3 +309,319 @@ async def test_clear_tasks_logic(setup_db):
         resp = await client.get("/api/tasks", headers=_auth_headers())
         assert len(resp.json()) == 0
 
+
+@pytest.mark.asyncio
+async def test_block_account_marks_checkpoint_status_for_checkpoint_reason(setup_db):
+    async_session = setup_db
+    async with async_session() as session:
+        acc = Account(
+            login="checkpoint_user",
+            password="p",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add(acc)
+        await session.commit()
+
+        await api_module._block_account_due_to_captcha(
+            session, acc, reason="Checkpoint detected after target navigation"
+        )
+        await session.refresh(acc)
+
+        assert acc.status == AccountStatus.CHECKPOINT
+
+
+@pytest.mark.asyncio
+async def test_process_browser_task_does_not_fail_on_post_action_state_save(
+    setup_db, monkeypatch
+):
+    async_session = setup_db
+
+    async with async_session() as session:
+        account = Account(
+            login="worker_user",
+            password="p",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add(account)
+        await session.commit()
+        await session.refresh(account)
+
+        task = Task(
+            account_id=account.id,
+            action_type=TaskActionType.COMMENT_POST,
+            target_url="https://www.facebook.com/share/p/demo",
+            payload_text="ok",
+            status=TaskStatus.IN_PROGRESS,
+            target_gender="ANY",
+        )
+        session.add(task)
+        await session.commit()
+        await session.refresh(task)
+        task_id = task.id
+
+        class StubBrowser:
+            def __init__(
+                self,
+                account,
+                headless,
+                strict_cookie_session,
+                log_callback,
+            ) -> None:
+                self._closed = False
+                self.log_callback = log_callback
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                self._closed = True
+
+            async def login(self) -> None:
+                await self.log_callback("Авторизация успешна (storage_state/cookies активны).")
+
+            async def leave_comment(self, target_url: str, text: str) -> bool:
+                return True
+
+            async def like_comment(self, target_url: str) -> bool:
+                return True
+
+            async def reply_comment(self, target_url: str, text: str) -> bool:
+                return True
+
+            async def get_storage_state(self):
+                if self._closed:
+                    raise RuntimeError(
+                        "BrowserContext.storage_state: Target page, context or browser has been closed"
+                    )
+                return {"cookies": [{"name": "c_user", "value": "1"}]}
+
+        async def _fast_sleep(_: float) -> None:
+            return None
+
+        monkeypatch.setattr(api_module, "FacebookBrowser", StubBrowser)
+        monkeypatch.setattr(api_module.asyncio, "sleep", _fast_sleep)
+        monkeypatch.setattr(api_module.random, "randint", lambda a, b: a)
+
+        task_obj = await session.get(Task, task_id)
+        finished = await api_module._process_browser_task(session, task_obj)
+        await session.refresh(task_obj)
+        log_rows = await session.scalars(select(Log).where(Log.task_id == task_id))
+        messages = [row.message for row in log_rows]
+
+        assert finished is True
+        assert task_obj.status == TaskStatus.SUCCESS
+        assert any("Завершено: Успех" in msg for msg in messages)
+        assert not any("Критическая ошибка браузера:" in msg for msg in messages)
+
+
+@pytest.mark.asyncio
+async def test_get_active_account_allows_other_action_type_for_same_url(setup_db):
+    async_session = setup_db
+    async with async_session() as session:
+        acc = Account(
+            login="shared_actor",
+            password="p",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add(acc)
+        await session.commit()
+        await session.refresh(acc)
+
+        done_reply = Task(
+            account_id=acc.id,
+            action_type=TaskActionType.REPLY_COMMENT,
+            target_url="https://fb.com/comment/1",
+            payload_text="ok",
+            target_gender="ANY",
+            status=TaskStatus.SUCCESS,
+        )
+        session.add(done_reply)
+        await session.commit()
+
+        selected = await api_module._get_active_account(
+            session,
+            target_url="https://fb.com/comment/1",
+            target_gender="ANY",
+            action_type=TaskActionType.LIKE_COMMENT_BOT,
+        )
+
+        assert selected.id == acc.id
+
+
+@pytest.mark.asyncio
+async def test_get_active_account_skips_comment_author_for_reply_comment(setup_db):
+    async_session = setup_db
+    async with async_session() as session:
+        author = Account(
+            login="author_42",
+            password="p",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        other = Account(
+            login="other_42",
+            password="p",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add_all([author, other])
+        await session.commit()
+
+        selected = await api_module._get_active_account(
+            session,
+            target_url="https://fb.com/comment/2",
+            target_gender="ANY",
+            action_type=TaskActionType.REPLY_COMMENT,
+            target_author_id="author_42",
+        )
+
+        assert selected.login == "other_42"
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_accounts_endpoint_deletes_only_selected(setup_db):
+    async_session = setup_db
+    async with async_session() as session:
+        acc1 = Account(
+            login="bulk_user_1",
+            password="p",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        acc2 = Account(
+            login="bulk_user_2",
+            password="p",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        acc3 = Account(
+            login="bulk_user_3",
+            password="p",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add_all([acc1, acc2, acc3])
+        await session.commit()
+        await session.refresh(acc1)
+        await session.refresh(acc2)
+        await session.refresh(acc3)
+
+        selected_ids = [acc1.id, acc3.id, 999999]
+
+    importlib.reload(api_module)
+    transport = httpx.ASGITransport(app=api_module.app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        resp = await client.post(
+            "/api/accounts/bulk_delete",
+            json={"ids": selected_ids},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["status"] == "success"
+        assert payload["deleted"] == 2
+        assert 999999 in payload["not_found"]
+
+        accounts_resp = await client.get("/api/accounts", headers=_auth_headers())
+        assert accounts_resp.status_code == 200
+        remaining_logins = [a["login"] for a in accounts_resp.json()]
+        assert remaining_logins == ["bulk_user_2"]
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_proxies_endpoint_deletes_only_selected(setup_db):
+    async_session = setup_db
+    async with async_session() as session:
+        p1 = Proxy(host="11.11.11.11", port=80, is_active=True)
+        p2 = Proxy(host="22.22.22.22", port=80, is_active=True)
+        p3 = Proxy(host="33.33.33.33", port=80, is_active=True)
+        session.add_all([p1, p2, p3])
+        await session.commit()
+        await session.refresh(p1)
+        await session.refresh(p2)
+        await session.refresh(p3)
+
+        acc = Account(
+            login="bulk_proxy_holder",
+            password="p",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+            proxy_id=p1.id,
+        )
+        session.add(acc)
+        await session.commit()
+
+        selected_ids = [p1.id, p3.id, 777777]
+
+    importlib.reload(api_module)
+    transport = httpx.ASGITransport(app=api_module.app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        resp = await client.post(
+            "/api/proxies/bulk_delete",
+            json={"ids": selected_ids},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["status"] == "success"
+        assert payload["deleted"] == 2
+        assert 777777 in payload["not_found"]
+
+        proxies_resp = await client.get("/api/proxies", headers=_auth_headers())
+        assert proxies_resp.status_code == 200
+        hosts = [p["host"] for p in proxies_resp.json()]
+        assert hosts == ["22.22.22.22"]
+
+        accounts_resp = await client.get("/api/accounts", headers=_auth_headers())
+        assert accounts_resp.status_code == 200
+        assert accounts_resp.json()[0]["proxy_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_reply_task_saves_target_author_metadata(setup_db):
+    async_session = setup_db
+    async with async_session() as session:
+        acc = Account(
+            login="meta_user",
+            password="p",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add(acc)
+        await session.commit()
+
+    importlib.reload(api_module)
+    transport = httpx.ASGITransport(app=api_module.app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        resp = await client.post(
+            "/api/tasks",
+            json={
+                "url": "https://fb.com/comment/target",
+                "action_type": "reply_comment",
+                "payload_text": "hello",
+                "quantity": 1,
+                "target_author_id": "author_99",
+                "target_author_name": "Author Name",
+            },
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 201
+
+    async with api_module.SessionLocal() as session:
+        task = await session.scalar(
+            select(Task).where(Task.target_url == "https://fb.com/comment/target")
+        )
+        assert task is not None
+        assert hasattr(task, "target_author_id")
+        assert hasattr(task, "target_author_name")
+        assert task.target_author_id == "author_99"
+        assert task.target_author_name == "Author Name"

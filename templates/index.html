@@ -12,6 +12,76 @@
       * {
         font-family: 'JetBrains Mono', monospace !important;
       }
+
+      .selection-check {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 18px;
+        height: 18px;
+        min-width: 18px;
+        min-height: 18px;
+        border: 1px solid #3f3f46;
+        border-radius: 6px;
+        background: linear-gradient(180deg, #131827 0%, #09090b 100%);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.04),
+          0 2px 4px rgba(0, 0, 0, 0.35);
+        display: inline-grid;
+        place-content: center;
+        cursor: pointer;
+        position: relative;
+        transition: border-color 180ms ease, box-shadow 180ms ease, transform 120ms ease;
+      }
+
+      .selection-check:hover {
+        border-color: rgba(16, 185, 129, 0.85);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.05),
+          0 0 0 2px rgba(16, 185, 129, 0.12),
+          0 6px 14px rgba(0, 0, 0, 0.45);
+      }
+
+      .selection-check:active {
+        transform: scale(0.96);
+      }
+
+      .selection-check:checked {
+        border-color: rgba(16, 185, 129, 0.95);
+        background: linear-gradient(180deg, #34d399 0%, #10b981 100%);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.16),
+          0 0 0 2px rgba(16, 185, 129, 0.18),
+          0 8px 18px rgba(16, 185, 129, 0.22);
+      }
+
+      .selection-check:checked::after {
+        content: "";
+        width: 5px;
+        height: 9px;
+        border: solid rgba(4, 16, 11, 0.95);
+        border-width: 0 2px 2px 0;
+        transform: translateY(-1px) rotate(45deg);
+      }
+
+      .selection-check:indeterminate {
+        border-color: rgba(16, 185, 129, 0.95);
+        background: linear-gradient(180deg, #34d399 0%, #10b981 100%);
+      }
+
+      .selection-check:indeterminate::after {
+        content: "";
+        width: 9px;
+        height: 2px;
+        border-radius: 999px;
+        background: rgba(4, 16, 11, 0.95);
+      }
+
+      .selection-check:focus-visible {
+        outline: none;
+        box-shadow:
+          0 0 0 3px rgba(16, 185, 129, 0.28),
+          inset 0 1px 0 rgba(255, 255, 255, 0.07);
+      }
     </style>
   </head>
   <body class="bg-zinc-950 text-zinc-100 min-h-screen">
@@ -50,6 +120,11 @@
             <span class="text-sm text-zinc-300 font-medium">Текст / Username</span>
             <textarea id="payloadText" class="mt-1 w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-shadow" rows="3" placeholder="Для комментариев: каждый новый комментарий с новой строки.&#10;Для лайка комментария: введите username владельца."></textarea>
           </label>
+          <input id="targetAuthorId" type="hidden" />
+          <input id="targetAuthorName" type="hidden" />
+          <div id="targetAuthorMeta" class="md:col-span-2 hidden text-xs text-sky-300 bg-sky-950/30 border border-sky-900/50 rounded px-3 py-2">
+            Целевой автор комментария: <span id="targetAuthorMetaText" class="font-bold"></span>
+          </div>
           <label class="block">
             <span class="text-sm text-zinc-300 font-medium">Количество <span class="text-zinc-500 font-normal">(для комментов — сколько аккаунтов взять)</span></span>
             <input id="quantity" type="number" min="1" value="1" class="mt-1 w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-shadow" />
@@ -144,7 +219,10 @@
             <div class="flex items-center gap-2">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg> Аккаунты
             </div>
-            <button onclick="document.getElementById('accountFileInput').click()" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded shadow-md shadow-emerald-900/20 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 active:scale-[0.96] transition-all font-bold tracking-wider uppercase">Загрузить .txt</button>
+            <div class="flex items-center gap-2">
+              <button onclick="bulkDeleteAccounts()" class="text-xs bg-red-950/50 hover:bg-red-900 text-red-300 px-3 py-1.5 rounded border border-red-900/50 focus:outline-none focus:ring-2 focus:ring-red-500/50 active:scale-[0.96] transition-all font-bold tracking-wider uppercase">Удалить выбранные</button>
+              <button onclick="document.getElementById('accountFileInput').click()" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded shadow-md shadow-emerald-900/20 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 active:scale-[0.96] transition-all font-bold tracking-wider uppercase">Загрузить .txt</button>
+            </div>
           </h2>
           <div id="uploadOverlay" class="hidden absolute inset-0 bg-emerald-900/90 backdrop-blur-sm rounded-xl z-10 flex flex-col items-center justify-center border-2 border-dashed border-emerald-400">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-emerald-400 mb-2 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
@@ -154,7 +232,10 @@
             <table class="w-full text-sm">
               <thead class="text-zinc-400 bg-zinc-950/50">
                 <tr>
-                  <th class="text-left py-3 pl-4 font-semibold">ID</th>
+                  <th class="text-left py-3 pl-4 pr-2 font-semibold w-12">
+                    <input id="selectAllAccounts" type="checkbox" onchange="toggleAllAccounts(this.checked)" class="selection-check" />
+                  </th>
+                  <th class="text-left py-3 pl-1 font-semibold">ID</th>
                   <th class="text-left py-3 font-semibold">Логин</th>
                   <th class="text-left py-3 font-semibold">Прокси</th>
                   <th class="text-left py-3 font-semibold">Статус</th>
@@ -171,6 +252,7 @@
             <div class="flex items-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg> Прокси</div>
             <div class="flex items-center gap-2">
               <input id="proxySearch" oninput="filterProxies()" placeholder="Поиск (сессия/хост)" class="text-[10px] bg-zinc-950 border border-zinc-700 rounded px-2 py-1 focus:ring-1 focus:ring-emerald-500 outline-none w-32" />
+              <button onclick="bulkDeleteProxies()" class="text-xs bg-red-950/50 hover:bg-red-900 text-red-300 px-3 py-1.5 rounded border border-red-900/50 focus:outline-none focus:ring-2 focus:ring-red-500/50 active:scale-[0.96] transition-all font-bold tracking-wider uppercase">Удалить выбранные</button>
               <button onclick="document.getElementById('proxyModal').classList.remove('hidden')" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded shadow-md shadow-emerald-900/20 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 active:scale-[0.96] transition-all font-bold tracking-wider uppercase">Импорт</button>
             </div>
           </h2>
@@ -178,7 +260,10 @@
             <table class="w-full text-sm">
               <thead class="text-zinc-400 bg-zinc-950/50">
                 <tr>
-                  <th class="text-left py-3 pl-4 font-semibold">ID</th>
+                  <th class="text-left py-3 pl-4 pr-2 font-semibold w-12">
+                    <input id="selectAllProxies" type="checkbox" onchange="toggleAllProxies(this.checked)" class="selection-check" />
+                  </th>
+                  <th class="text-left py-3 pl-1 font-semibold">ID</th>
                   <th class="text-left py-3 font-semibold">Сессия / Хост</th>
                   <th class="text-left py-3 font-semibold">Использует</th>
                   <th class="text-left py-3 font-semibold">Статус</th>
@@ -240,15 +325,39 @@
       const commentsTable = document.getElementById("commentsTable");
       const parserDebugLog = document.getElementById("parserDebugLog");
       const parserWarning = document.getElementById("parserWarning");
+      const targetAuthorIdField = document.getElementById("targetAuthorId");
+      const targetAuthorNameField = document.getElementById("targetAuthorName");
+      const targetAuthorMeta = document.getElementById("targetAuthorMeta");
+      const targetAuthorMetaText = document.getElementById("targetAuthorMetaText");
 
       function isApiAction(action) {
         return action === "like_post" || action === "follow" || action === "like_comment_bot";
+      }
+
+      function clearTargetAuthorMeta() {
+        targetAuthorIdField.value = "";
+        targetAuthorNameField.value = "";
+        targetAuthorMetaText.textContent = "";
+        targetAuthorMeta.classList.add("hidden");
+      }
+
+      function setTargetAuthorMeta(authorId, authorName) {
+        const normalizedId = String(authorId || "").trim();
+        const normalizedName = String(authorName || "").trim();
+        targetAuthorIdField.value = normalizedId;
+        targetAuthorNameField.value = normalizedName;
+        const displayText = normalizedName || normalizedId || "-";
+        targetAuthorMetaText.textContent = displayText;
+        targetAuthorMeta.classList.remove("hidden");
       }
 
       function toggleTextField() {
         const hide = isApiAction(actionType.value);
         textFieldWrap.style.display = hide ? "none" : "block";
         if (hide) payloadText.value = "";
+        if (actionType.value !== "reply_comment") {
+          clearTargetAuthorMeta();
+        }
       }
 
       function escapeHtml(value) {
@@ -260,13 +369,14 @@
           .replaceAll("'", "&#39;");
       }
 
-      function fillTaskFromComment(commentUrl, targetAction) {
+      function fillTaskFromComment(commentUrl, targetAction, targetAuthorId = "", targetAuthorName = "") {
         if (!commentUrl) return;
         urlField.value = commentUrl;
         actionType.value = targetAction;
         toggleTextField();
         taskForm.scrollIntoView({ behavior: "smooth", block: "start" });
         if (targetAction === "reply_comment") {
+          setTargetAuthorMeta(targetAuthorId, targetAuthorName);
           setTimeout(() => payloadText.focus(), 250);
         }
       }
@@ -283,13 +393,16 @@
         commentsTable.innerHTML = comments
           .map((comment, index) => {
             const author = escapeHtml(comment.author || comment.username || "-");
+            const authorId = escapeHtml(comment.author_id || comment.author || "");
             const text = escapeHtml(comment.text || comment.comment_text || "-");
             const commentUrl = escapeHtml(comment.comment_url || comment.url || "");
             const dateStr = comment.date ? new Date(comment.date).toLocaleString("ru-RU") : "-";
             const likesCount = comment.likes_count || 0;
             return `
               <tr class="comment-row border-t border-zinc-800 align-top cursor-pointer hover:bg-zinc-800 transition-colors"
-                  data-comment-url="${commentUrl}">
+                  data-comment-url="${commentUrl}"
+                  data-comment-author-id="${authorId}"
+                  data-comment-author-name="${author}">
                 <td class="py-3 pl-4 pr-2">
                   <div class="font-medium text-sky-400">${author}</div>
                   <div class="text-[10px] text-zinc-500">${dateStr}</div>
@@ -321,16 +434,108 @@
       }
 
       let allProxies = [];
+      let allAccounts = [];
+      const selectedAccountIds = new Set();
+      const selectedProxyIds = new Set();
+
+      function toggleAccountSelection(accountId, checked) {
+        if (checked) {
+          selectedAccountIds.add(accountId);
+        } else {
+          selectedAccountIds.delete(accountId);
+        }
+        updateAccountSelectAllState();
+      }
+
+      function toggleProxySelection(proxyId, checked) {
+        if (checked) {
+          selectedProxyIds.add(proxyId);
+        } else {
+          selectedProxyIds.delete(proxyId);
+        }
+        updateProxySelectAllState();
+      }
+
+      function toggleAllAccounts(checked) {
+        const checkboxes = Array.from(
+          document.querySelectorAll('input[data-account-checkbox="1"]')
+        );
+        checkboxes.forEach((checkbox) => {
+          checkbox.checked = checked;
+          const accountId = Number(checkbox.dataset.accountId);
+          if (checked) {
+            selectedAccountIds.add(accountId);
+          } else {
+            selectedAccountIds.delete(accountId);
+          }
+        });
+        updateAccountSelectAllState();
+      }
+
+      function toggleAllProxies(checked) {
+        const checkboxes = Array.from(
+          document.querySelectorAll('input[data-proxy-checkbox="1"]')
+        );
+        checkboxes.forEach((checkbox) => {
+          checkbox.checked = checked;
+          const proxyId = Number(checkbox.dataset.proxyId);
+          if (checked) {
+            selectedProxyIds.add(proxyId);
+          } else {
+            selectedProxyIds.delete(proxyId);
+          }
+        });
+        updateProxySelectAllState();
+      }
+
+      function updateAccountSelectAllState() {
+        const selectAll = document.getElementById("selectAllAccounts");
+        if (!selectAll) return;
+        const checkboxes = Array.from(
+          document.querySelectorAll('input[data-account-checkbox="1"]')
+        );
+        if (checkboxes.length === 0) {
+          selectAll.checked = false;
+          selectAll.indeterminate = false;
+          return;
+        }
+        const selected = checkboxes.filter((checkbox) => checkbox.checked).length;
+        selectAll.checked = selected === checkboxes.length;
+        selectAll.indeterminate = selected > 0 && selected < checkboxes.length;
+      }
+
+      function updateProxySelectAllState() {
+        const selectAll = document.getElementById("selectAllProxies");
+        if (!selectAll) return;
+        const checkboxes = Array.from(
+          document.querySelectorAll('input[data-proxy-checkbox="1"]')
+        );
+        if (checkboxes.length === 0) {
+          selectAll.checked = false;
+          selectAll.indeterminate = false;
+          return;
+        }
+        const selected = checkboxes.filter((checkbox) => checkbox.checked).length;
+        selectAll.checked = selected === checkboxes.length;
+        selectAll.indeterminate = selected > 0 && selected < checkboxes.length;
+      }
 
       async function refreshProxies() {
         const response = await fetch("/api/proxies");
         allProxies = await response.json();
+        const existingIds = new Set(allProxies.map((p) => p.id));
+        Array.from(selectedProxyIds).forEach((id) => {
+          if (!existingIds.has(id)) {
+            selectedProxyIds.delete(id);
+          }
+        });
         renderProxiesTable(allProxies);
       }
 
       async function deleteProxy(proxyId) {
         if (!confirm(`Удалить прокси #${proxyId}?`)) return;
         await fetch(`/api/proxies/${proxyId}`, { method: "DELETE" });
+        selectedProxyIds.delete(proxyId);
         await refreshProxies();
         await refreshAccounts();
       }
@@ -346,7 +551,17 @@
           .map(
             (p) => `
             <tr class="border-t border-zinc-800 hover:bg-zinc-900/50 transition-colors">
-              <td class="py-2 pl-4 text-zinc-500 font-mono text-xs">${p.id}</td>
+              <td class="w-12 py-2 pl-4 pr-2">
+                <input
+                  type="checkbox"
+                  data-proxy-checkbox="1"
+                  data-proxy-id="${p.id}"
+                  ${selectedProxyIds.has(p.id) ? "checked" : ""}
+                  onchange="toggleProxySelection(${p.id}, this.checked)"
+                  class="selection-check"
+                />
+              </td>
+              <td class="py-2 pl-1 text-zinc-500 font-mono text-xs">${p.id}</td>
               <td class="py-2 text-zinc-300 font-mono text-[10px]">
                 <div class="text-emerald-400 font-bold uppercase tracking-tight mb-1">${p.name || ""}</div>
                 <div class="text-sky-400 font-bold">${p.session_id || "-"}</div>
@@ -370,6 +585,7 @@
             </tr>`
           )
           .join("");
+        updateProxySelectAllState();
       }
 
       function filterProxies() {
@@ -386,6 +602,50 @@
         if (!confirm(`Пометить аккаунт #${accId} как Banned (Сдох)?`)) return;
         await fetch(`/api/accounts/${accId}/ban`, { method: "POST" });
         await refreshAccounts();
+      }
+
+      async function bulkDeleteAccounts() {
+        const ids = Array.from(selectedAccountIds);
+        if (!ids.length) {
+          alert("Выберите аккаунты для удаления.");
+          return;
+        }
+        if (!confirm(`Удалить выбранные аккаунты: ${ids.length} шт.?`)) return;
+
+        const response = await fetch("/api/accounts/bulk_delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          alert(payload.detail || "Ошибка массового удаления аккаунтов");
+          return;
+        }
+        selectedAccountIds.clear();
+        await Promise.all([refreshAccounts(), refreshTasks()]);
+      }
+
+      async function bulkDeleteProxies() {
+        const ids = Array.from(selectedProxyIds);
+        if (!ids.length) {
+          alert("Выберите прокси для удаления.");
+          return;
+        }
+        if (!confirm(`Удалить выбранные прокси: ${ids.length} шт.?`)) return;
+
+        const response = await fetch("/api/proxies/bulk_delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          alert(payload.detail || "Ошибка массового удаления прокси");
+          return;
+        }
+        selectedProxyIds.clear();
+        await Promise.all([refreshProxies(), refreshAccounts()]);
       }
 
       async function updateAccountProxy(accId, proxyId) {
@@ -410,6 +670,13 @@
       async function refreshAccounts() {
         const response = await fetch("/api/accounts");
         const accounts = await response.json();
+        allAccounts = accounts;
+        const existingIds = new Set(accounts.map((a) => a.id));
+        Array.from(selectedAccountIds).forEach((id) => {
+          if (!existingIds.has(id)) {
+            selectedAccountIds.delete(id);
+          }
+        });
         
         const select = document.getElementById("manualAccount");
         const currentVal = select.value;
@@ -433,7 +700,17 @@
               }).join("");              
               return `
               <tr class="border-t border-zinc-800 hover:bg-zinc-900/50 transition-colors">
-                <td class="py-2 pl-4 text-zinc-500 font-mono text-xs">${a.id}</td>
+                <td class="w-12 py-2 pl-4 pr-2">
+                  <input
+                    type="checkbox"
+                    data-account-checkbox="1"
+                    data-account-id="${a.id}"
+                    ${selectedAccountIds.has(a.id) ? "checked" : ""}
+                    onchange="toggleAccountSelection(${a.id}, this.checked)"
+                    class="selection-check"
+                  />
+                </td>
+                <td class="py-2 pl-1 text-zinc-500 font-mono text-xs">${a.id}</td>
                 <td class="py-2 text-zinc-200 font-semibold">${a.login}</td>
                 <td class="py-2">
                   <select onchange="updateAccountProxy(${a.id}, this.value)" class="bg-zinc-950 border border-zinc-700 rounded px-1 py-1 text-[10px] text-zinc-300 w-40 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer">
@@ -462,6 +739,7 @@
             }
           )
           .join("");
+        updateAccountSelectAllState();
       }
 
       async function refreshTasks() {
@@ -531,17 +809,31 @@
           payload_text: payloadText.value || null,
           quantity: Number(document.getElementById("quantity").value || 1),
           target_gender: targetGender.value,
-          account_id: accountId ? Number(accountId) : null
+          account_id: accountId ? Number(accountId) : null,
+          target_author_id:
+            actionType.value === "reply_comment"
+              ? (targetAuthorIdField.value || null)
+              : null,
+          target_author_name:
+            actionType.value === "reply_comment"
+              ? (targetAuthorNameField.value || null)
+              : null,
         };
         try {
-          await fetch("/api/tasks", {
+          const response = await fetch("/api/tasks", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           });
-          // Optional: clear form on success
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            alert(data.detail || "Не удалось создать задачу.");
+            return;
+          }
+
           urlField.value = "";
           payloadText.value = "";
+          clearTargetAuthorMeta();
         } finally {
           submitBtn.disabled = false;
           submitBtn.textContent = originalText;
@@ -603,7 +895,9 @@
         row.classList.add("bg-sky-950", "border-sky-500");
 
         const commentUrl = row.dataset.commentUrl || "";
-        fillTaskFromComment(commentUrl, "reply_comment");
+        const commentAuthorId = row.dataset.commentAuthorId || "";
+        const commentAuthorName = row.dataset.commentAuthorName || "";
+        fillTaskFromComment(commentUrl, "reply_comment", commentAuthorId, commentAuthorName);
       });
 
       document.getElementById("importProxiesBtn").addEventListener("click", async () => {
@@ -649,6 +943,7 @@
       async function deleteAccount(accId) {
         if (!confirm(`Удалить аккаунт #${accId}? Это также удалит все связанные с ним задачи.`)) return;
         await fetch(`/api/accounts/${accId}`, { method: "DELETE" });
+        selectedAccountIds.delete(accId);
         await refreshAccounts();
       }
 

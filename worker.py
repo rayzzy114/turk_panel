@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
 import re
 from dataclasses import dataclass
@@ -55,6 +56,7 @@ class FacebookBrowser:
     PATTERNS = {
         "LIKE": re.compile(r"\b(Нравится|Like|Beğen)\b", re.IGNORECASE),
     }
+    CHECKPOINT_URL_RE: Final[re.Pattern[str]] = re.compile(r"/checkpoint/?", re.IGNORECASE)
 
     def __init__(
         self,
@@ -80,6 +82,12 @@ class FacebookBrowser:
         self.logger.info(message)
         if self.log_callback:
             await self.log_callback(message)
+
+    @staticmethod
+    def _parse_bool(value: str | None, *, default: bool = False) -> bool:
+        if value is None:
+            return default
+        return value.strip().lower() in {"1", "true", "yes", "on"}
 
     async def __aenter__(self) -> FacebookBrowser:
         await self.start()
@@ -148,7 +156,16 @@ class FacebookBrowser:
     async def _human_type(self, text: str) -> None:
         """Эмуляция человеческого набора текста: разные задержки, микропаузы."""
         for char in text:
-            await self.page.keyboard.press(char)
+            try:
+                await self.page.keyboard.press(char)
+            except Exception as exc:
+                if "Unknown key" not in str(exc):
+                    raise
+                insert_text = getattr(self.page.keyboard, "insert_text", None)
+                if callable(insert_text):
+                    await insert_text(char)
+                else:
+                    await self.page.keyboard.type(char)
             # Базовая задержка
             delay = random.uniform(0.05, 0.15)
             # Иногда делаем "микропаузу" (человек задумался)
@@ -200,12 +217,15 @@ class FacebookBrowser:
         await self._log("Прогрев сессии на главной...")
         try:
             await self.page.goto(self.BASE_URL, wait_until="domcontentloaded", timeout=self.DEFAULT_TIMEOUT_MS)
+            await self._raise_if_checkpoint("warmup")
             await asyncio.sleep(random.uniform(6.0, 12.0))
             await self._close_dialogs()
             # Человеческий скролл
             for _ in range(random.randint(2, 4)):
                 await self._human_scroll(random.randint(200, 500))
                 await asyncio.sleep(random.uniform(1.0, 3.0))
+        except AccountCaptchaError:
+            raise
         except Exception:
                 pass
 
@@ -251,9 +271,10 @@ class FacebookBrowser:
         await self.page.keyboard.press("Enter")
         
         await asyncio.sleep(random.uniform(10, 20))
+        await self._raise_if_checkpoint("login")
         
         # Проверка на капчу/ошибку
-        if "checkpoint" in self.page.url or await self.page.locator("form[action*=\"login\"]").count() > 0:
+        if await self.page.locator("form[action*=\"login\"]").count() > 0:
             await self._log("ВНИМАНИЕ: Facebook требует проверку (капча/пароль).")
             raise AccountCaptchaError("Checkpoint detected during login.")
 
@@ -299,6 +320,9 @@ class FacebookBrowser:
             await self.page.goto(target_url, wait_until="domcontentloaded", referer=self.BASE_URL)
             await asyncio.sleep(random.uniform(12, 20))
             await self._dismiss_action_blockers()
+            await self._raise_if_checkpoint("target navigation")
+        except AccountCaptchaError:
+            raise
         except Exception:
             return False
 
@@ -434,6 +458,9 @@ class FacebookBrowser:
             await self.page.goto(target_url, wait_until="domcontentloaded", referer=self.BASE_URL)
             await asyncio.sleep(random.uniform(12, 20))
             await self._dismiss_action_blockers()
+            await self._raise_if_checkpoint("target navigation")
+        except AccountCaptchaError:
+            raise
         except Exception:
             return False
 
@@ -536,8 +563,9 @@ class FacebookBrowser:
             # Не переходим на главную если мы уже там
             if self.page.url != self.BASE_URL:
                 await self.page.goto(self.BASE_URL, wait_until="domcontentloaded")
-            cookies = await self._context.cookies()
-            return any(cookie.get("name") == "c_user" for cookie in cookies)
+            if self.CHECKPOINT_URL_RE.search(self.page.url or ""):
+                return False
+            return await self._has_c_user_cookie()
         except Exception:
             return False
 
@@ -545,12 +573,59 @@ class FacebookBrowser:
         await self._pre_action_warmup()
         try:
             await self.page.goto(target_url, wait_until="domcontentloaded", referer=self.BASE_URL)
+            await self._raise_if_checkpoint("target navigation")
             await asyncio.sleep(random.uniform(10, 18))
             btn = self.page.get_by_role("button", name=self.PATTERNS["LIKE"], exact=True).filter(visible=True).first
             if await btn.is_visible(timeout=5000):
                 await self._human_click(btn)
                 await self._post_action_simulation()
                 return True
+        except AccountCaptchaError:
+                raise
         except Exception:
                 pass
+        return False
+
+    async def _raise_if_checkpoint(self, stage: str) -> None:
+        current_url = self.page.url or ""
+        if self.CHECKPOINT_URL_RE.search(current_url):
+            await self._log(
+                f"CHECKPOINT: Facebook запросил подтверждение личности на этапе '{stage}': {current_url}"
+            )
+            if await self._wait_for_checkpoint_resolution():
+                await self._log(
+                    "CHECKPOINT: подтверждение пройдено вручную, продолжаю выполнение."
+                )
+                return
+            raise AccountCaptchaError(
+                f"Checkpoint detected during {stage}: {current_url}"
+            )
+
+    async def _has_c_user_cookie(self) -> bool:
+        cookies = await self._context.cookies()
+        return any(cookie.get("name") == "c_user" for cookie in cookies)
+
+    async def _wait_for_checkpoint_resolution(self) -> bool:
+        keep_open = self._parse_bool(
+            os.getenv("FB_KEEP_BROWSER_ON_CHECKPOINT"), default=True
+        )
+        if not keep_open:
+            return False
+
+        wait_seconds = int(os.getenv("FB_CHECKPOINT_WAIT_SECONDS", "600"))
+        poll_seconds = max(1, int(os.getenv("FB_CHECKPOINT_POLL_SECONDS", "5")))
+        attempts = max(1, wait_seconds // poll_seconds)
+
+        await self._log(
+            f"CHECKPOINT: браузер оставлен открытым на {wait_seconds} сек для ручного ввода кода."
+        )
+        for _ in range(attempts):
+            await asyncio.sleep(poll_seconds)
+            current_url = self.page.url or ""
+            if self.CHECKPOINT_URL_RE.search(current_url):
+                continue
+            if await self._has_c_user_cookie():
+                return True
+
+        await self._log("CHECKPOINT: время ожидания вышло, аккаунт будет помечен как CHECKPOINT.")
         return False

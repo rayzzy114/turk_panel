@@ -111,6 +111,8 @@ class Task(Base):
     )
     target_url: Mapped[str] = mapped_column(String(1000), nullable=False)
     payload_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_author_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_author_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     external_order_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_gender: Mapped[str] = mapped_column(
         String(3), nullable=False, default="ANY", server_default="ANY"

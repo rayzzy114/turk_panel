@@ -56,6 +56,7 @@ async def test_apify_api_returns_normalized_comments() -> None:
     assert comments == [
         {
             "author": "Alice",
+            "author_id": "",
             "text": "Hello",
             "comment_url": "https://example.com/c/1",
             "date": "",
@@ -65,6 +66,7 @@ async def test_apify_api_returns_normalized_comments() -> None:
         },
         {
             "author": "Bob",
+            "author_id": "",
             "text": "World",
             "comment_url": "https://example.com/c/2",
             "date": "",

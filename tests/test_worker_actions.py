@@ -10,7 +10,7 @@ import pytest
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 import worker
-from worker import AccountSessionData, FacebookBrowser
+from worker import AccountCaptchaError, AccountSessionData, FacebookBrowser
 
 
 @pytest.fixture(autouse=True)
@@ -160,6 +160,7 @@ class FakeKeyboard:
         self.type_delays: list[int] = []
         self.typed: list[str] = []
         self.type_delays: list[int] = []
+        self.inserted: list[str] = []
 
     async def press(self, key: str) -> None:
         self.pressed.append(key)
@@ -172,6 +173,10 @@ class FakeKeyboard:
         self.typed.append(value)
         if delay is not None:
             self.type_delays.append(delay)
+
+    async def insert_text(self, value: str) -> None:
+        self.inserted.append(value)
+        self.typed.append(value)
 
 
 class FakeContext:
@@ -198,6 +203,7 @@ class FakePage:
         dialog_count: int = 0,
         url: str = "https://www.facebook.com/",
         goto_error: Exception | None = None,
+        goto_result_url: str | None = None,
     ) -> None:
         self.role_locators = list(role_locators or [])
         self.label_locators = list(label_locators or [])
@@ -210,6 +216,7 @@ class FakePage:
         self.login_form_count = login_form_count
         self.dialog_count = dialog_count
         self.goto_error = goto_error
+        self.goto_result_url = goto_result_url
         self.waits: list[float] = []
         self.goto_urls: list[str] = []
         self.keyboard = FakeKeyboard()
@@ -230,7 +237,7 @@ class FakePage:
         if self.goto_error:
             raise self.goto_error
         self.goto_urls.append(target_url)
-        self.url = target_url
+        self.url = self.goto_result_url or target_url
 
     async def wait_for_timeout(self, timeout_ms: float) -> None:
         self.waits.append(timeout_ms)
@@ -321,11 +328,11 @@ def _create_browser_with_page(
             user_agent="Mozilla/5.0 test",
         )
     )
-    browser._page = page  # type: ignore[assignment]
+    browser._page = page
     initial_cookies = (
         cookies_data if cookies_data is not None else [{"name": "c_user", "value": "1"}]
     )
-    browser._context = FakeContext(initial_cookies)  # type: ignore[assignment]
+    browser._context = FakeContext(initial_cookies)
     return browser
 
 
@@ -382,6 +389,77 @@ async def test_leave_comment_returns_false_when_open_comment_fails() -> None:
 
 
 @pytest.mark.asyncio
+async def test_leave_comment_raises_checkpoint_error_when_redirected_to_checkpoint() -> (
+    None
+):
+    page = FakePage(goto_result_url="https://www.facebook.com/checkpoint/8282")
+    browser = _create_browser_with_page(page)
+
+    with pytest.raises(AccountCaptchaError, match="Checkpoint"):
+        await browser.leave_comment("https://example.com/post", "Тест")
+
+
+@pytest.mark.asyncio
+async def test_leave_comment_waits_on_checkpoint_before_failing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = FakePage(goto_result_url="https://www.facebook.com/checkpoint/8282")
+    browser = _create_browser_with_page(page)
+
+    async def _noop(*_: Any, **__: Any) -> None:
+        return None
+
+    sleeps: list[float] = []
+
+    async def _tracked_sleep(seconds: float) -> None:
+        sleeps.append(float(seconds))
+
+    monkeypatch.setattr(FacebookBrowser, "_pre_action_warmup", _noop)
+    monkeypatch.setattr(FacebookBrowser, "_dismiss_action_blockers", _noop)
+    monkeypatch.setattr(worker.asyncio, "sleep", _tracked_sleep)
+    monkeypatch.setenv("FB_KEEP_BROWSER_ON_CHECKPOINT", "1")
+    monkeypatch.setenv("FB_CHECKPOINT_WAIT_SECONDS", "15")
+    monkeypatch.setenv("FB_CHECKPOINT_POLL_SECONDS", "5")
+
+    with pytest.raises(AccountCaptchaError, match="Checkpoint"):
+        await browser.leave_comment("https://example.com/post", "Тест")
+
+    # 1 ожидание после goto + 3 poll-а на checkpoint
+    assert sleeps.count(5.0) >= 3
+
+
+@pytest.mark.asyncio
+async def test_leave_comment_continues_after_manual_checkpoint_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    comment_input = FakeLocator()
+    page = FakePage(
+        goto_result_url="https://www.facebook.com/checkpoint/8282",
+        comment_inputs=[comment_input],
+    )
+    browser = _create_browser_with_page(page)
+
+    async def _noop(*_: Any, **__: Any) -> None:
+        return None
+
+    async def _tracked_sleep(seconds: float) -> None:
+        # Эмулируем, что пользователь подтвердил вход и FB вернул на обычную страницу.
+        if float(seconds) == 1.0:
+            page.url = "https://www.facebook.com/"
+
+    monkeypatch.setattr(FacebookBrowser, "_pre_action_warmup", _noop)
+    monkeypatch.setattr(FacebookBrowser, "_dismiss_action_blockers", _noop)
+    monkeypatch.setattr(worker.asyncio, "sleep", _tracked_sleep)
+    monkeypatch.setenv("FB_KEEP_BROWSER_ON_CHECKPOINT", "1")
+    monkeypatch.setenv("FB_CHECKPOINT_WAIT_SECONDS", "10")
+    monkeypatch.setenv("FB_CHECKPOINT_POLL_SECONDS", "1")
+
+    result = await browser.leave_comment("https://example.com/post", "Тест")
+
+    assert result is True
+
+
+@pytest.mark.asyncio
 async def test_leave_comment_uses_control_enter_when_enter_did_not_submit() -> None:
     comment_input = FakeLocator(
         evaluate_return_by_substring={"innerText": True},
@@ -393,6 +471,27 @@ async def test_leave_comment_uses_control_enter_when_enter_did_not_submit() -> N
 
     assert result is True
     assert page.keyboard.pressed[-2:] == ["Enter", "Control+Enter"]
+
+
+@pytest.mark.asyncio
+async def test_leave_comment_with_emoji_text_uses_insert_text_fallback() -> None:
+    comment_input = FakeLocator()
+    page = FakePage(comment_inputs=[comment_input])
+    browser = _create_browser_with_page(page)
+
+    original_press = page.keyboard.press
+
+    async def _emoji_unsupported_press(key: str) -> None:
+        if key == "👍":
+            raise RuntimeError('Keyboard.press: Unknown key: "👍"')
+        await original_press(key)
+
+    page.keyboard.press = _emoji_unsupported_press  # type: ignore[method-assign]
+
+    result = await browser.leave_comment("https://example.com/post", "👍👍")
+
+    assert result is True
+    assert page.keyboard.inserted == ["👍", "👍"]
 
 
 @pytest.mark.asyncio

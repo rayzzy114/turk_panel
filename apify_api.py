@@ -66,7 +66,7 @@ class ApifyAPI:
 
     async def run_facebook_comments_scraper(
         self, url: str
-    ) -> tuple[list[dict[str, str]], list[str]]:
+    ) -> tuple[list[dict[str, Any]], list[str]]:
         debug = [f"actor={self.actor_id}", f"url={url}"]
         run_payload = {
             "startUrls": [{"url": url}],
@@ -169,6 +169,15 @@ def _normalize_item(item: dict[str, Any]) -> dict[str, str | int | list[Any]]:
         or item.get("facebookName")
         or "Unknown"
     )
+    author_id = (
+        item.get("profileId")
+        or item.get("authorId")
+        or item.get("facebookId")
+        or item.get("userId")
+        or item.get("profile_id")
+        or item.get("author_id")
+        or ""
+    )
     text = item.get("text") or item.get("commentText") or item.get("body") or ""
     comment_url = item.get("commentUrl") or item.get("url") or ""
 
@@ -183,6 +192,7 @@ def _normalize_item(item: dict[str, Any]) -> dict[str, str | int | list[Any]]:
 
     return {
         "author": str(author).strip(),
+        "author_id": str(author_id).strip(),
         "text": str(text).strip(),
         "comment_url": str(comment_url).strip(),
         "date": str(date_str),
