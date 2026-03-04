@@ -90,20 +90,14 @@ class FacebookBrowser:
 
     async def start(self) -> None:
         try:
-            proxy_str = None
+            proxy_kwargs = {}
             if self.account.proxy:
-                host = self.account.proxy.host
-                port = self.account.proxy.port
-                user = self.account.proxy.user
-                pwd = self.account.proxy.password
-                if user and pwd:
-                    proxy_str = f"http://{user}:{pwd}@{host}:{port}"
-                else:
-                    proxy_str = f"http://{host}:{port}"
+                proxy_kwargs["proxy"] = self.account.proxy.to_playwright_proxy()
+                proxy_kwargs["geoip"] = True
 
             self._camoufox = AsyncCamoufox(
                 headless=self.headless,
-                proxy=proxy_str,
+                **proxy_kwargs
                 # Camoufox takes care of stealth without patching
             )
             self._browser = await self._camoufox.__aenter__()
