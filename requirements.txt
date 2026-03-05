@@ -5,6 +5,7 @@ fastapi>=0.116.1
 httpx>=0.28.1
 jinja2>=3.1.6
 playwright>=1.58.0
+camoufox[geoip]>=0.4.0
 playwright-stealth>=2.0.2
 python-dotenv>=1.1.1
 sqlalchemy>=2.0.47
