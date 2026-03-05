@@ -682,6 +682,7 @@ class FacebookBrowser:
 
                 if code:
                     await self._log(f"Получен код подтверждения: {code}")
+                    await code_input.first.focus()
                     await self._human_type(code)
 
                     submit_btn = self.page.get_by_text(
