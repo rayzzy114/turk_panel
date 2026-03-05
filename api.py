@@ -1083,6 +1083,38 @@ async def bulk_shadow_unban_accounts(payload: BulkDeleteIn) -> dict[str, Any]:
     }
 
 
+@app.post("/api/accounts/bulk_unassign_proxy")
+async def bulk_unassign_proxy_accounts(payload: BulkDeleteIn) -> dict[str, Any]:
+    normalized_ids = _unique_positive_ids(payload.ids)
+    if not normalized_ids:
+        raise HTTPException(status_code=400, detail="Список ids пуст")
+
+    await _ensure_tables()
+    async with SessionLocal() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(Account).where(Account.id.in_(normalized_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        existing_id_set = {row.id for row in rows}
+        for account in rows:
+            account.proxy_id = None
+            session.add(account)
+        if rows:
+            await session.commit()
+
+    not_found = [item for item in normalized_ids if item not in existing_id_set]
+    return {
+        "status": "success",
+        "updated": len(existing_id_set),
+        "not_found": not_found,
+    }
+
+
 @app.post("/api/accounts/bulk_check_login")
 async def bulk_check_login_accounts(payload: BulkDeleteIn) -> dict[str, Any]:
     normalized_ids = _unique_positive_ids(payload.ids)
@@ -1124,6 +1156,57 @@ async def bulk_check_login_accounts(payload: BulkDeleteIn) -> dict[str, Any]:
         "status": "success",
         "created_tasks": len(active_rows),
         "skipped_not_active": skipped_not_active,
+        "not_found": not_found,
+    }
+
+
+@app.post("/api/accounts/bulk_warmup")
+async def bulk_warmup_accounts(payload: BulkDeleteIn) -> dict[str, Any]:
+    normalized_ids = _unique_positive_ids(payload.ids)
+    if not normalized_ids:
+        raise HTTPException(status_code=400, detail="Список ids пуст")
+
+    await _ensure_tables()
+    async with SessionLocal() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(Account).where(Account.id.in_(normalized_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        existing_ids = {row.id for row in rows}
+        active_rows = [row for row in rows if row.status == AccountStatus.ACTIVE]
+        skipped_not_active = [row.id for row in rows if row.status != AccountStatus.ACTIVE]
+
+    not_found = [item for item in normalized_ids if item not in existing_ids]
+    failed: list[dict[str, Any]] = []
+    done = 0
+    skipped_recent = 0
+
+    for account in active_rows:
+        try:
+            result = await _warmup_account_impl(account.id)
+            if result.get("status") == "done":
+                done += 1
+            elif result.get("status") == "skipped":
+                skipped_recent += 1
+            else:
+                failed.append({"id": account.id, "reason": "unknown_status"})
+        except Exception as exc:  # pragma: no cover - defensive logging path
+            LOGGER.exception(
+                "Ошибка массового прогрева account_id=%s: %s", account.id, exc
+            )
+            failed.append({"id": account.id, "reason": str(exc)})
+
+    return {
+        "status": "success",
+        "done": done,
+        "skipped_recent": skipped_recent,
+        "skipped_not_active": skipped_not_active,
+        "failed": failed,
         "not_found": not_found,
     }
 

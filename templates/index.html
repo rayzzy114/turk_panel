@@ -264,7 +264,9 @@
                 <button id="bulkCheckLoginBtn" onclick="bulkCheckLoginAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-sky-950/60 hover:bg-sky-900 text-sky-300 rounded-md border border-sky-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Проверить вход</button>
                 <button id="bulkShadowBanBtn" onclick="bulkShadowBanAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-cyan-950/60 hover:bg-cyan-900 text-cyan-300 rounded-md border border-cyan-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Теневой 72ч</button>
                 <button id="bulkShadowUnbanBtn" onclick="bulkShadowUnbanAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-emerald-950/50 hover:bg-emerald-900 text-emerald-300 rounded-md border border-emerald-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Снять теневой</button>
+                <button id="bulkUnassignProxyBtn" onclick="bulkUnassignProxyAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-indigo-950/50 hover:bg-indigo-900 text-indigo-300 rounded-md border border-indigo-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Снять прокси</button>
                 <button id="bulkBanBtn" onclick="bulkBanAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-amber-950/50 hover:bg-amber-900 text-amber-300 rounded-md border border-amber-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">В Бан</button>
+                <button id="bulkWarmupBtn" onclick="bulkWarmupAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-md border border-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Прогрев</button>
                 <button onclick="document.getElementById('accountFileInput').click()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-emerald-600 hover:bg-emerald-500 text-white rounded-md shadow-md shadow-emerald-900/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase">Загрузить .txt</button>
               </div>
             </div>
@@ -285,10 +287,10 @@
                     </label>
                   </th>
                   <th scope="col" class="py-3 pl-1 pr-2 font-semibold w-10 text-center">ID</th>
-                  <th scope="col" class="py-3 px-2 font-semibold w-[20%] text-center">Логин</th>
-                  <th scope="col" class="py-3 px-2 font-semibold w-[32%] text-center">Прокси</th>
+                  <th scope="col" class="py-3 px-2 font-semibold w-[27%] text-center">Логин</th>
+                  <th scope="col" class="py-3 px-2 font-semibold w-[25%] text-center">Прокси</th>
                   <th scope="col" class="py-3 px-2 font-semibold w-[14%] text-center">Статус</th>
-                  <th scope="col" class="py-3 pl-2 pr-4 font-semibold w-[18%] text-center">Прогрев</th>
+                  <th scope="col" class="py-3 pl-2 pr-4 font-semibold w-[22%] text-center">Прогрев</th>
                 </tr>
               </thead>
               <tbody id="accountsTable"></tbody>
@@ -740,7 +742,9 @@
           "bulkCheckLoginBtn",
           "bulkShadowBanBtn",
           "bulkShadowUnbanBtn",
+          "bulkUnassignProxyBtn",
           "bulkBanBtn",
+          "bulkWarmupBtn",
         ];
         ids.forEach((id) => {
           const btn = document.getElementById(id);
@@ -1003,6 +1007,38 @@
         }
       }
 
+      async function bulkUnassignProxyAccounts() {
+        const ids = Array.from(selectedAccountIds);
+        if (!ids.length) {
+          alert("Выберите аккаунты для снятия прокси.");
+          return;
+        }
+        if (!confirm(`Снять прокси у ${ids.length} аккаунтов?`)) return;
+        isBulkActionRunning = true;
+        updateBulkActionButtonsState();
+        setBulkActionStatus("Снимаю прокси у выбранных аккаунтов...");
+        try {
+          const response = await fetch("/api/accounts/bulk_unassign_proxy", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids }),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            alert(payload.detail || "Ошибка массового снятия прокси");
+            return;
+          }
+          selectedAccountIds.clear();
+          setBulkActionStatus(
+            `Готово: прокси сняты у ${payload.updated ?? 0}`
+          );
+          await Promise.all([refreshAccounts(), refreshProxies()]);
+        } finally {
+          isBulkActionRunning = false;
+          updateBulkActionButtonsState();
+        }
+      }
+
       async function bulkCheckLoginAccounts() {
         const ids = Array.from(selectedAccountIds);
         if (!ids.length) {
@@ -1033,6 +1069,38 @@
           );
           alert(
             `Добавлено задач: ${payload.created_tasks ?? 0}\nПропущено неактивных: ${skippedCount}`
+          );
+          await Promise.all([refreshAccounts(), refreshTasks()]);
+        } finally {
+          isBulkActionRunning = false;
+          updateBulkActionButtonsState();
+        }
+      }
+
+      async function bulkWarmupAccounts() {
+        const ids = Array.from(selectedAccountIds);
+        if (!ids.length) {
+          alert("Выберите аккаунты для прогрева.");
+          return;
+        }
+        if (!confirm(`Запустить прогрев для ${ids.length} аккаунтов?`)) return;
+        isBulkActionRunning = true;
+        updateBulkActionButtonsState();
+        setBulkActionStatus("Запускаю массовый прогрев...");
+        try {
+          const response = await fetch("/api/accounts/bulk_warmup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids }),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            alert(payload.detail || "Ошибка массового прогрева");
+            return;
+          }
+          selectedAccountIds.clear();
+          setBulkActionStatus(
+            `Готово: прогрето ${payload.done ?? 0}, пропущено ${payload.skipped_not_active?.length ?? 0}, ошибок ${payload.failed?.length ?? 0}`
           );
           await Promise.all([refreshAccounts(), refreshTasks()]);
         } finally {
@@ -1154,7 +1222,7 @@
                 <td class="py-3 pl-1 pr-2 text-zinc-500 font-mono text-xs text-center">${a.id}</td>
                 <td class="py-3 px-2 text-zinc-200 font-semibold text-center">
                   <div class="flex items-center justify-center gap-1.5 min-w-0">
-                    <span class="truncate">${a.login}</span>
+                    <span class="leading-tight break-all">${a.login}</span>
                     <button
                       type="button"
                       onclick="showAccountEmailModal(${a.id})"
