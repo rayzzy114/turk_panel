@@ -91,6 +91,9 @@ class Account(Base):
     )
     last_action_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     user_agent: Mapped[str] = mapped_column(String(512), nullable=False)
+    email_login: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    imap_server: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     proxy: Mapped[Proxy | None] = relationship(back_populates="accounts")
     tasks: Mapped[list["Task"]] = relationship(

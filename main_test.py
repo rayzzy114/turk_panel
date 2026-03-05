@@ -88,9 +88,11 @@ async def run_main_test() -> None:
             LOGGER.info(
                 "Найден аккаунт %s, proxy=%s",
                 account.login,
-                f"{account.proxy.host}:{account.proxy.port}"
-                if account.proxy
-                else "нет",
+                (
+                    f"{account.proxy.host}:{account.proxy.port}"
+                    if account.proxy
+                    else "нет"
+                ),
             )
 
             session_data = AccountSessionData(

@@ -37,6 +37,8 @@ async def upsert_account(
     gender: str = "ANY",
     cookies: list[dict[str, Any]] | None = None,
     default_proxy_id: int | None = None,
+    email_login: str | None = None,
+    email_password: str | None = None,
 ) -> Account:
     """Updates an existing account or creates a new one with an available proxy."""
     account = await session.scalar(select(Account).where(Account.login == login))
@@ -51,11 +53,17 @@ async def upsert_account(
             status=AccountStatus.ACTIVE,
             gender=gender,
             user_agent=user_agent,
+            email_login=email_login,
+            email_password=email_password,
         )
         session.add(account)
     else:
         account.password = password
         account.cookies = cookies
+        if email_login:
+            account.email_login = email_login
+        if email_password:
+            account.email_password = email_password
         if account.proxy_id is None:
             account.proxy_id = await get_available_proxy_id(session) or default_proxy_id
         account.status = AccountStatus.ACTIVE

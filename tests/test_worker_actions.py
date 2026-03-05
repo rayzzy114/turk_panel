@@ -74,7 +74,9 @@ class FakeLocator:
     async def is_visible(self, timeout: int | None = None) -> bool:
         return self.visible
 
-    async def wait_for(self, state: str = "visible", timeout: int | None = None) -> None:
+    async def wait_for(
+        self, state: str = "visible", timeout: int | None = None
+    ) -> None:
         self.wait_states.append(state)
         if state == "visible" and not self.visible:
             raise RuntimeError("locator is not visible")
@@ -137,7 +139,9 @@ class FakeLocator:
         if "href*='comment_id='" in selector or 'href*="comment_id="' in selector:
             if self.link_locator:
                 return self.link_locator
-        if ("[role='button']" in selector or '[role="button"]' in selector) and self.button_locator:
+        if (
+            "[role='button']" in selector or '[role="button"]' in selector
+        ) and self.button_locator:
             return self.button_locator
         if "a[role='link']" in selector or 'a[role="link"]' in selector:
             if self.author_locator:
@@ -254,7 +258,9 @@ class FakePage:
     async def evaluate(self, script: str) -> None:
         self.scroll_calls += 1
 
-    def get_by_role(self, role: str, name: Any, exact: bool | None = None) -> FakeLocator:
+    def get_by_role(
+        self, role: str, name: Any, exact: bool | None = None
+    ) -> FakeLocator:
         if self.role_locators:
             return self.role_locators.pop(0)
         return FakeLocator(click_error=RuntimeError("role locator not found"))
@@ -300,7 +306,7 @@ class FakePage:
                 visible=bool(self.comment_inputs),
             )
         if (
-            "data-ad-rendering-role=\"like_button\"" in selector
+            'data-ad-rendering-role="like_button"' in selector
             or "data-ad-rendering-role='like_button'" in selector
         ):
             return FakeLocator(
@@ -514,7 +520,9 @@ async def test_like_comment_returns_true_when_dialog_like_button_is_found() -> N
     page = FakePage(like_buttons=[FakeLocator(text="Beğen")])
     browser = _create_browser_with_page(page)
 
-    result = await browser.like_comment("https://example.com/post?comment_id=920444257376774")
+    result = await browser.like_comment(
+        "https://example.com/post?comment_id=920444257376774"
+    )
 
     assert result is True
     assert page.mouse_clicks
@@ -576,9 +584,7 @@ async def test_is_authorized_returns_false_when_c_user_cookie_is_missing() -> No
 
 
 @pytest.mark.asyncio
-async def test_is_authorized_returns_false_when_login_wall_detected() -> (
-    None
-):
+async def test_is_authorized_returns_false_when_login_wall_detected() -> None:
     page = FakePage(login_form_count=1, dialog_count=1)
     browser = _create_browser_with_page(page, cookies_data=[])
 

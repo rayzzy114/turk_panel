@@ -48,7 +48,7 @@ def test_colon_credentials_robustness():
     # Test with potential false positives
     lines = ["URL: https://facebook.com", "login:password", "Name: John"]
     creds = _parse_colon_credentials(lines)
-    assert creds == ("login", "password")
+    assert creds == ("login", "password", None, None)
 
     # Test with space in login (should be skipped)
     lines = ["invalid login:password"]

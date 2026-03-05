@@ -8,7 +8,16 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from models import Base, Account, AccountStatus, Log, Proxy, Task, TaskStatus, TaskActionType
+from models import (
+    Base,
+    Account,
+    AccountStatus,
+    Log,
+    Proxy,
+    Task,
+    TaskStatus,
+    TaskActionType,
+)
 import api as api_module
 import importlib
 from pathlib import Path
@@ -71,7 +80,10 @@ async def test_account_daily_limit_selection(setup_db):
         session.add(acc2)
         await session.commit()
 
-        with pytest.raises(RuntimeError, match="Не найден свободный аккаунт, который еще не выполнял действий по этой ссылке"):
+        with pytest.raises(
+            RuntimeError,
+            match="Не найден свободный аккаунт, который еще не выполнял действий по этой ссылке",
+        ):
             await api_module._get_active_account(session, "http://test.com")
 
 
@@ -97,13 +109,19 @@ async def test_gender_filtering_selection(setup_db):
         session.add_all([m, f])
         await session.commit()
 
-        sel_m = await api_module._get_active_account(session, target_url="http://fb.com", target_gender="M")
+        sel_m = await api_module._get_active_account(
+            session, target_url="http://fb.com", target_gender="M"
+        )
         assert sel_m.login == "male"
 
-        sel_f = await api_module._get_active_account(session, target_url="http://fb.com", target_gender="F")
+        sel_f = await api_module._get_active_account(
+            session, target_url="http://fb.com", target_gender="F"
+        )
         assert sel_f.login == "female"
 
-        sel_any = await api_module._get_active_account(session, target_url="http://fb.com", target_gender="ANY")
+        sel_any = await api_module._get_active_account(
+            session, target_url="http://fb.com", target_gender="ANY"
+        )
         assert sel_any.login in ["male", "female"]
 
 
@@ -379,7 +397,9 @@ async def test_process_browser_task_does_not_fail_on_post_action_state_save(
                 self._closed = True
 
             async def login(self) -> None:
-                await self.log_callback("Авторизация успешна (storage_state/cookies активны).")
+                await self.log_callback(
+                    "Авторизация успешна (storage_state/cookies активны)."
+                )
 
             async def leave_comment(self, target_url: str, text: str) -> bool:
                 return True
