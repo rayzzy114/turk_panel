@@ -196,6 +196,9 @@ def _migrate_schema_if_needed(connection: Any) -> None:
     add_column_if_missing("tasks", "target_gender", "TEXT DEFAULT 'ANY'")
     add_column_if_missing("tasks", "target_author_id", "TEXT")
     add_column_if_missing("tasks", "target_author_name", "TEXT")
+    add_column_if_missing("accounts", "email_login", "TEXT")
+    add_column_if_missing("accounts", "email_password", "TEXT")
+    add_column_if_missing("accounts", "imap_server", "TEXT")
 
     # Приведение данных к правильным значениям Enum (имена членов - верхний регистр)
     connection.exec_driver_sql(
@@ -267,13 +270,19 @@ async def _get_active_account(
     # ERROR intentionally is not in this list: failed task means action not completed.
     already_assigned_stmt = select(Task.account_id).where(
         Task.target_url == target_url,
-        Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.SUCCESS]),
-        Task.account_id.is_not(None)
+        Task.status.in_(
+            [TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.SUCCESS]
+        ),
+        Task.account_id.is_not(None),
     )
     if action_type is not None:
         # Different actions on same URL should not block each other (reply vs like_comment_bot).
-        already_assigned_stmt = already_assigned_stmt.where(Task.action_type == action_type)
-    already_assigned_ids = (await session.execute(already_assigned_stmt)).scalars().all()
+        already_assigned_stmt = already_assigned_stmt.where(
+            Task.action_type == action_type
+        )
+    already_assigned_ids = (
+        (await session.execute(already_assigned_stmt)).scalars().all()
+    )
 
     stmt = (
         select(Account)
@@ -311,7 +320,9 @@ async def _get_active_account(
 
     account = await session.scalar(stmt)
     if account is None:
-        raise RuntimeError("Не найден свободный аккаунт, который еще не выполнял действий по этой ссылке.")
+        raise RuntimeError(
+            "Не найден свободный аккаунт, который еще не выполнял действий по этой ссылке."
+        )
     return account
 
 
@@ -420,6 +431,7 @@ class BulkDeleteIn(BaseModel):
 
 ACCOUNT_SELECTION_LOCK = asyncio.Lock()
 
+
 async def _save_account_state(browser, account, session) -> None:
     state = await browser.get_storage_state()
     if state:
@@ -428,7 +440,6 @@ async def _save_account_state(browser, account, session) -> None:
         if cookies:
             account.cookies = cookies
         await session.commit()
-
 
 
 async def _process_browser_task(session: Any, task: Task) -> bool:
@@ -477,13 +488,15 @@ async def _process_browser_task(session: Any, task: Task) -> bool:
 
     try:
         await _add_task_log(session, task.id, f"Используем аккаунт {account.login}")
-        
+
         async def worker_log(msg: str):
             await _add_task_log(session, task.id, msg)
 
         async with FacebookBrowser(
-            account=session_data, headless=headless, strict_cookie_session=False,
-            log_callback=worker_log
+            account=session_data,
+            headless=headless,
+            strict_cookie_session=False,
+            log_callback=worker_log,
         ) as browser:
             await browser.login()
             await _save_account_state(browser, account, session)
@@ -518,19 +531,25 @@ async def _process_browser_task(session: Any, task: Task) -> bool:
                 if task.action_type == TaskActionType.LIKE_COMMENT_BOT:
                     ok = await browser.like_comment(task.target_url)
                     if not ok:
-                        await _add_task_log(session, task.id, "Ошибка: Кнопка лайка не найдена.")
+                        await _add_task_log(
+                            session, task.id, "Ошибка: Кнопка лайка не найдена."
+                        )
                 elif task.action_type == TaskActionType.REPLY_COMMENT:
                     ok = await browser.reply_comment(
                         task.target_url, task.payload_text or ""
                     )
                     if not ok:
-                        await _add_task_log(session, task.id, "Ошибка: Не удалось отправить ответ.")
+                        await _add_task_log(
+                            session, task.id, "Ошибка: Не удалось отправить ответ."
+                        )
                 else:
                     ok = await browser.leave_comment(
                         task.target_url, task.payload_text or "Test"
                     )
                     if not ok:
-                        await _add_task_log(session, task.id, "Ошибка: Не удалось оставить комментарий.")
+                        await _add_task_log(
+                            session, task.id, "Ошибка: Не удалось оставить комментарий."
+                        )
 
                 if ok:
                     await _save_account_state(browser, account, session)
@@ -614,15 +633,22 @@ async def _run_browser_task_wrapper(task_id: int, semaphore: asyncio.Semaphore):
                 await session.commit()
 
                 if was_processed:
-                    delay = random.uniform(60, 150)  # Уменьшил паузу, раз мы в параллели
-                    LOGGER.info("Задача %s завершена. Пауза потока %.1f сек...", task_id, delay)
+                    delay = random.uniform(
+                        60, 150
+                    )  # Уменьшил паузу, раз мы в параллели
+                    LOGGER.info(
+                        "Задача %s завершена. Пауза потока %.1f сек...", task_id, delay
+                    )
                     await asyncio.sleep(delay)
         except Exception:
             LOGGER.exception("Ошибка в потоке задачи %s", task_id)
 
 
 async def browser_worker_loop() -> None:
-    LOGGER.info("Запущен параллельный воркер TURKISH PANEL (Лимит: %s)", MAX_CONCURRENT_BROWSER_TASKS)
+    LOGGER.info(
+        "Запущен параллельный воркер TURKISH PANEL (Лимит: %s)",
+        MAX_CONCURRENT_BROWSER_TASKS,
+    )
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_BROWSER_TASKS)
     active_tasks = set()
 
@@ -658,8 +684,10 @@ async def browser_worker_loop() -> None:
                         if task_obj:
                             task_obj.status = TaskStatus.IN_PROGRESS
                             await session.commit()
-                            
-                            t = asyncio.create_task(_run_browser_task_wrapper(tid, semaphore))
+
+                            t = asyncio.create_task(
+                                _run_browser_task_wrapper(tid, semaphore)
+                            )
                             active_tasks.add(t)
 
             await asyncio.sleep(5)
@@ -820,15 +848,27 @@ async def bulk_delete_accounts(payload: BulkDeleteIn) -> dict[str, Any]:
     await _ensure_tables()
     async with SessionLocal() as session:
         existing_ids = (
-            await session.execute(select(Account.id).where(Account.id.in_(normalized_ids)))
-        ).scalars().all()
+            (
+                await session.execute(
+                    select(Account.id).where(Account.id.in_(normalized_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
         existing_id_set = set(existing_ids)
         if existing_id_set:
-            await session.execute(delete(Account).where(Account.id.in_(list(existing_id_set))))
+            await session.execute(
+                delete(Account).where(Account.id.in_(list(existing_id_set)))
+            )
             await session.commit()
 
     not_found = [item for item in normalized_ids if item not in existing_id_set]
-    return {"status": "success", "deleted": len(existing_id_set), "not_found": not_found}
+    return {
+        "status": "success",
+        "deleted": len(existing_id_set),
+        "not_found": not_found,
+    }
 
 
 @app.post("/api/proxies/bulk_delete")
@@ -840,15 +880,27 @@ async def bulk_delete_proxies(payload: BulkDeleteIn) -> dict[str, Any]:
     await _ensure_tables()
     async with SessionLocal() as session:
         existing_ids = (
-            await session.execute(select(Proxy.id).where(Proxy.id.in_(normalized_ids)))
-        ).scalars().all()
+            (
+                await session.execute(
+                    select(Proxy.id).where(Proxy.id.in_(normalized_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
         existing_id_set = set(existing_ids)
         if existing_id_set:
-            await session.execute(delete(Proxy).where(Proxy.id.in_(list(existing_id_set))))
+            await session.execute(
+                delete(Proxy).where(Proxy.id.in_(list(existing_id_set)))
+            )
             await session.commit()
 
     not_found = [item for item in normalized_ids if item not in existing_id_set]
-    return {"status": "success", "deleted": len(existing_id_set), "not_found": not_found}
+    return {
+        "status": "success",
+        "deleted": len(existing_id_set),
+        "not_found": not_found,
+    }
 
 
 @app.post("/api/accounts/{account_id}/ban")
@@ -1013,7 +1065,9 @@ async def create_task(payload: TaskCreate) -> TaskOut | list[TaskOut]:
                 # Если создаем много задач, лучше использовать авто-подбор для каждой,
                 # чтобы они не улетели с одного аккаунта.
                 # Если же задача одна, используем выбранный вручную (если есть).
-                assigned_account_id = payload.account_id if payload.quantity == 1 else None
+                assigned_account_id = (
+                    payload.account_id if payload.quantity == 1 else None
+                )
                 if (
                     payload.action_type == TaskActionType.REPLY_COMMENT
                     and assigned_account_id is not None
@@ -1123,6 +1177,8 @@ async def upload_accounts(files: list[UploadFile] = File(...)) -> dict[str, Any]
                 user_agent=parsed.user_agent,
                 gender=parsed.gender,
                 cookies=parsed.cookies,
+                email_login=parsed.email_login,
+                email_password=parsed.email_password,
             )
 
             imported += 1

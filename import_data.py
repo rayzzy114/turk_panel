@@ -109,9 +109,11 @@ class AccountSource:
 class ParsedAccount:
     login: str
     password: str
-    cookies: list[dict[str, str]]
+    cookies: list[dict[str, str]] | None
     user_agent: str
     gender: str
+    email_login: str | None = None
+    email_password: str | None = None
 
 
 @dataclass(slots=True)
@@ -242,10 +244,12 @@ def _parse_colon_credentials(lines: list[str]) -> tuple[str, str] | None:
         if any(lower.startswith(prefix) for prefix in blocked_prefixes):
             continue
         parts = [chunk.strip() for chunk in value.split(":")]
-        if len(parts) == 2:
-            login, password = parts
+        if len(parts) >= 2:
+            login, password = parts[0], parts[1]
             if login and password and " " not in login:
-                return login, password
+                email_login = parts[2] if len(parts) >= 3 else None
+                email_password = parts[3] if len(parts) >= 4 else None
+                return login, password, email_login, email_password
     return None
 
 
@@ -345,8 +349,10 @@ def parse_account_text(
 
     login: str | None = None
     password: str | None = None
+    email_login: str | None = None
+    email_password: str | None = None
     if credentials:
-        login, password = credentials
+        login, password, email_login, email_password = credentials
 
     if not login and cookies:
         c_user = next(
