@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TURKISH PANEL 🇹🇷</title>
+    <title>TURKISH PANEL</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
@@ -16,10 +16,10 @@
       .selection-check {
         appearance: none;
         -webkit-appearance: none;
-        width: 18px;
-        height: 18px;
-        min-width: 18px;
-        min-height: 18px;
+        width: 22px;
+        height: 22px;
+        min-width: 22px;
+        min-height: 22px;
         border: 1px solid #3f3f46;
         border-radius: 6px;
         background: linear-gradient(180deg, #131827 0%, #09090b 100%);
@@ -82,13 +82,51 @@
           0 0 0 3px rgba(16, 185, 129, 0.28),
           inset 0 1px 0 rgba(255, 255, 255, 0.07);
       }
+
+      .touch-target {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+      }
+
+      .touch-target-sm {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+          scroll-behavior: auto !important;
+        }
+        .animate-spin,
+        .animate-bounce {
+          animation: none !important;
+        }
+      }
     </style>
   </head>
   <body class="bg-zinc-950 text-zinc-100 min-h-screen">
     <div class="max-w-7xl mx-auto px-4 py-8">
       <header class="flex flex-wrap items-center justify-between gap-4 mb-8">
         <div class="flex items-center gap-3">
-          <span class="text-4xl drop-shadow-md">🇹🇷</span>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            class="h-9 w-9 text-emerald-400 drop-shadow-md"
+            aria-hidden="true"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M3 4.5h12.5L14 8l1.5 3.5H3V4.5Zm0 7v8M3 8h12.5" />
+          </svg>
           <h1 class="text-3xl font-black tracking-tight uppercase italic text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-sky-500">TURKISH PANEL</h1>
         </div>
         <div class="bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 shadow-lg shadow-emerald-900/10">
@@ -215,31 +253,42 @@
       <section class="grid lg:grid-cols-2 gap-6 mb-8">
         <div id="accountsDropZone" class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 shadow-lg shadow-black/50 relative transition-colors">
           <input type="file" id="accountFileInput" multiple accept=".txt" class="hidden" />
-          <h2 class="text-lg font-semibold mb-4 flex items-center justify-between text-zinc-100">
-            <div class="flex items-center gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg> Аккаунты
+          <h2 class="text-lg font-semibold mb-4 text-zinc-100">
+            <div class="flex items-center gap-2 mb-3">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+              <span class="font-bold tracking-wide">Аккаунты</span>
+              <span id="selectedAccountsBadge" class="inline-flex items-center h-5 px-2 text-xs bg-zinc-800 text-zinc-200 rounded-full border border-zinc-700">Выбрано: 0</span>
             </div>
-            <div class="flex items-center gap-2">
-              <button onclick="bulkDeleteAccounts()" class="text-xs bg-red-950/50 hover:bg-red-900 text-red-300 px-3 py-1.5 rounded border border-red-900/50 focus:outline-none focus:ring-2 focus:ring-red-500/50 active:scale-[0.96] transition-all font-bold tracking-wider uppercase">Удалить выбранные</button>
-              <button onclick="document.getElementById('accountFileInput').click()" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded shadow-md shadow-emerald-900/20 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 active:scale-[0.96] transition-all font-bold tracking-wider uppercase">Загрузить .txt</button>
+            <div class="w-full overflow-x-auto pb-1">
+              <div class="flex items-center gap-2 min-w-max pr-1">
+                <button id="bulkCheckLoginBtn" onclick="bulkCheckLoginAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-sky-950/60 hover:bg-sky-900 text-sky-300 rounded-md border border-sky-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Проверить вход</button>
+                <button id="bulkShadowBanBtn" onclick="bulkShadowBanAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-cyan-950/60 hover:bg-cyan-900 text-cyan-300 rounded-md border border-cyan-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Теневой 72ч</button>
+                <button id="bulkShadowUnbanBtn" onclick="bulkShadowUnbanAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-emerald-950/50 hover:bg-emerald-900 text-emerald-300 rounded-md border border-emerald-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Снять теневой</button>
+                <button id="bulkBanBtn" onclick="bulkBanAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-amber-950/50 hover:bg-amber-900 text-amber-300 rounded-md border border-amber-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">В Бан</button>
+                <button onclick="document.getElementById('accountFileInput').click()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-emerald-600 hover:bg-emerald-500 text-white rounded-md shadow-md shadow-emerald-900/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase">Загрузить .txt</button>
+              </div>
             </div>
           </h2>
+          <div id="bulkActionStatus" class="sr-only" aria-live="polite"></div>
           <div id="uploadOverlay" class="hidden absolute inset-0 bg-emerald-900/90 backdrop-blur-sm rounded-xl z-10 flex flex-col items-center justify-center border-2 border-dashed border-emerald-400">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-emerald-400 mb-2 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
             <span class="font-bold text-emerald-100 text-lg">Бросай файлы сюда!</span>
           </div>
-          <div class="overflow-auto max-h-60 border border-zinc-800 rounded-lg">
-            <table class="w-full text-sm">
-              <thead class="text-zinc-400 bg-zinc-950/50">
+          <div class="overflow-y-auto overflow-x-hidden max-h-[420px] border border-zinc-800 rounded-lg">
+            <table class="w-full text-sm table-fixed">
+              <caption class="sr-only">Таблица аккаунтов для массовых действий</caption>
+              <thead class="sticky top-0 z-10 text-zinc-300 bg-zinc-950">
                 <tr>
-                  <th class="text-left py-3 pl-4 pr-2 font-semibold w-12">
-                    <input id="selectAllAccounts" type="checkbox" onchange="toggleAllAccounts(this.checked)" class="selection-check" />
+                  <th scope="col" class="py-3 pl-3 pr-1 font-semibold w-8 text-center">
+                    <label class="touch-target">
+                      <input id="selectAllAccounts" type="checkbox" onchange="toggleAllAccounts(this.checked)" class="selection-check" aria-label="Выбрать все аккаунты" />
+                    </label>
                   </th>
-                  <th class="text-left py-3 pl-1 font-semibold">ID</th>
-                  <th class="text-left py-3 font-semibold">Логин</th>
-                  <th class="text-left py-3 font-semibold">Прокси</th>
-                  <th class="text-left py-3 font-semibold">Статус</th>
-                  <th class="text-right py-3 pr-4 font-semibold"></th>
+                  <th scope="col" class="py-3 pl-1 pr-2 font-semibold w-10 text-center">ID</th>
+                  <th scope="col" class="py-3 px-2 font-semibold w-[20%] text-center">Логин</th>
+                  <th scope="col" class="py-3 px-2 font-semibold w-[32%] text-center">Прокси</th>
+                  <th scope="col" class="py-3 px-2 font-semibold w-[14%] text-center">Статус</th>
+                  <th scope="col" class="py-3 pl-2 pr-4 font-semibold w-[18%] text-center">Прогрев</th>
                 </tr>
               </thead>
               <tbody id="accountsTable"></tbody>
@@ -251,23 +300,24 @@
           <h2 class="text-lg font-semibold mb-4 flex items-center justify-between text-zinc-100">
             <div class="flex items-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg> Прокси</div>
             <div class="flex items-center gap-2">
-              <input id="proxySearch" oninput="filterProxies()" placeholder="Поиск (сессия/хост)" class="text-[10px] bg-zinc-950 border border-zinc-700 rounded px-2 py-1 focus:ring-1 focus:ring-emerald-500 outline-none w-32" />
-              <button onclick="bulkDeleteProxies()" class="text-xs bg-red-950/50 hover:bg-red-900 text-red-300 px-3 py-1.5 rounded border border-red-900/50 focus:outline-none focus:ring-2 focus:ring-red-500/50 active:scale-[0.96] transition-all font-bold tracking-wider uppercase">Удалить выбранные</button>
-              <button onclick="document.getElementById('proxyModal').classList.remove('hidden')" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded shadow-md shadow-emerald-900/20 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 active:scale-[0.96] transition-all font-bold tracking-wider uppercase">Импорт</button>
+              <input id="proxySearch" oninput="filterProxies()" placeholder="Поиск (сессия/хост)" class="text-xs bg-zinc-950 border border-zinc-700 rounded px-2 py-1 focus:ring-1 focus:ring-emerald-500 outline-none w-32" />
+              <button onclick="bulkDeleteProxies()" class="h-9 text-[11px] bg-red-950/50 hover:bg-red-900 text-red-300 px-2.5 py-1.5 rounded border border-red-900/50 focus:outline-none focus:ring-2 focus:ring-red-500/50 active:scale-[0.96] transition-all font-bold tracking-wider uppercase">Удалить выбранные</button>
+              <button onclick="document.getElementById('proxyModal').classList.remove('hidden')" class="h-9 text-[11px] bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 rounded shadow-md shadow-emerald-900/20 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 active:scale-[0.96] transition-all font-bold tracking-wider uppercase">Импорт</button>
             </div>
           </h2>
-          <div class="overflow-auto max-h-60 border border-zinc-800 rounded-lg">
+          <div class="overflow-auto max-h-[420px] border border-zinc-800 rounded-lg">
             <table class="w-full text-sm">
               <thead class="text-zinc-400 bg-zinc-950/50">
                 <tr>
-                  <th class="text-left py-3 pl-4 pr-2 font-semibold w-12">
-                    <input id="selectAllProxies" type="checkbox" onchange="toggleAllProxies(this.checked)" class="selection-check" />
+                  <th class="py-3 pl-4 pr-2 font-semibold w-12 text-center">
+                    <label class="touch-target">
+                      <input id="selectAllProxies" type="checkbox" onchange="toggleAllProxies(this.checked)" class="selection-check" />
+                    </label>
                   </th>
-                  <th class="text-left py-3 pl-1 font-semibold">ID</th>
-                  <th class="text-left py-3 font-semibold">Сессия / Хост</th>
-                  <th class="text-left py-3 font-semibold">Использует</th>
-                  <th class="text-left py-3 font-semibold">Статус</th>
-                  <th class="text-right py-3 pr-4 font-semibold"></th>
+                  <th class="py-3 pl-1 font-semibold text-center">ID</th>
+                  <th class="py-3 font-semibold text-center">Сессия / Хост</th>
+                  <th class="py-3 font-semibold text-center">Использует</th>
+                  <th class="py-3 font-semibold text-center">Статус</th>
                 </tr>
               </thead>
               <tbody id="proxiesTable"></tbody>
@@ -279,7 +329,7 @@
       <section class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 overflow-auto shadow-lg shadow-black/50">
         <h2 class="text-lg font-semibold mb-4 flex items-center justify-between text-zinc-100">
           <div class="flex items-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg> Очередь задач</div>
-          <button onclick="clearTasks()" class="text-[10px] bg-red-950/30 hover:bg-red-900 text-red-400 hover:text-red-100 px-3 py-1.5 rounded border border-red-900/50 transition-all uppercase font-bold focus:outline-none focus:ring-2 focus:ring-red-500/50 active:scale-[0.96]">Очистить историю</button>
+          <button onclick="clearTasks()" class="h-9 text-[11px] bg-red-950/30 hover:bg-red-900 text-red-400 hover:text-red-100 px-2.5 py-1.5 rounded border border-red-900/50 transition-all uppercase font-bold focus:outline-none focus:ring-2 focus:ring-red-500/50 active:scale-[0.96]">Очистить историю</button>
         </h2>
         <div class="border border-zinc-800 rounded-lg overflow-hidden">
           <table class="w-full text-sm">
@@ -299,14 +349,74 @@
     </div>
 
     <!-- Proxy Import Modal -->
-    <div id="proxyModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div id="proxyModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50" role="dialog" aria-modal="true" aria-labelledby="proxyModalTitle">
       <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 max-w-lg w-full">
-        <h2 class="text-xl font-bold mb-4 uppercase">Импорт прокси</h2>
+        <h2 id="proxyModalTitle" class="text-xl font-bold mb-4 uppercase">Импорт прокси</h2>
         <p class="text-sm text-zinc-400 mb-4">Вставьте список в формате <code>Имя|host:port:user:pass</code> (по одному в строке, имя опционально)</p>
         <textarea id="proxyData" class="w-full h-48 bg-zinc-950 border border-zinc-700 rounded p-3 text-sm font-mono mb-4" placeholder="Мобильные|1.2.3.4:8080:user:pass"></textarea>
         <div class="flex justify-end gap-3">
           <button onclick="document.getElementById('proxyModal').classList.add('hidden')" class="px-4 py-2 text-zinc-400 hover:text-white">Отмена</button>
           <button id="importProxiesBtn" class="bg-emerald-600 hover:bg-emerald-500 px-6 py-2 rounded font-bold">Залить</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="accountEmailModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50" role="dialog" aria-modal="true" aria-labelledby="accountEmailModalTitle">
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 max-w-md w-full" tabindex="-1">
+        <div class="flex items-center justify-between mb-4">
+          <h2 id="accountEmailModalTitle" class="text-lg font-bold uppercase">Почта аккаунта</h2>
+          <button
+            type="button"
+            onclick="closeAccountEmailModal()"
+            class="text-zinc-400 hover:text-zinc-100 text-xl leading-none"
+            aria-label="Закрыть"
+          >
+            ×
+          </button>
+        </div>
+        <div class="space-y-3 text-sm">
+          <div>
+            <div class="text-zinc-500 text-xs uppercase tracking-wider mb-1">Аккаунт</div>
+            <div id="accountEmailAccountLogin" class="font-semibold text-zinc-100 break-all">-</div>
+          </div>
+          <div>
+            <div class="text-zinc-500 text-xs uppercase tracking-wider mb-1">Почта</div>
+            <input
+              id="accountEmailLoginInput"
+              type="text"
+              autocomplete="off"
+              placeholder="mail@example.com"
+              class="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            />
+          </div>
+          <div>
+            <div class="text-zinc-500 text-xs uppercase tracking-wider mb-1">Пароль почты</div>
+            <input
+              id="accountEmailPasswordInput"
+              type="text"
+              autocomplete="off"
+              placeholder="пароль почты"
+              class="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            />
+          </div>
+          <div id="accountEmailStatus" class="text-xs min-h-[1rem] text-zinc-500"></div>
+        </div>
+        <div class="mt-5 flex justify-end gap-2">
+          <button
+            id="accountEmailSaveBtn"
+            type="button"
+            onclick="saveAccountEmailModal()"
+            class="px-3 py-1.5 text-xs bg-emerald-700 hover:bg-emerald-600 text-white rounded border border-emerald-600"
+          >
+            Сохранить
+          </button>
+          <button
+            type="button"
+            onclick="closeAccountEmailModal()"
+            class="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-100 rounded border border-zinc-700"
+          >
+            Закрыть
+          </button>
         </div>
       </div>
     </div>
@@ -405,7 +515,7 @@
                   data-comment-author-name="${author}">
                 <td class="py-3 pl-4 pr-2">
                   <div class="font-medium text-sky-400">${author}</div>
-                  <div class="text-[10px] text-zinc-500">${dateStr}</div>
+                  <div class="text-xs text-zinc-500">${dateStr}</div>
                 </td>
                 <td class="py-3 pr-2 max-w-[480px] break-words">${text}</td>
                 <td class="py-3 pr-2 text-zinc-400 font-mono">${likesCount}</td>
@@ -425,18 +535,219 @@
       }
 
       function statusBadge(status) {
-        const base = "px-2 py-0.5 rounded-full font-bold text-[10px] uppercase tracking-wider border ";
+        const base = "px-2 py-0.5 rounded-full font-bold text-xs uppercase tracking-wider border ";
         if (status === "active" || status === "success") return base + "bg-emerald-950/40 text-emerald-400 border-emerald-900/50";
         if (status === "error" || status === "banned") return base + "bg-red-950/40 text-red-400 border-red-900/50";
+        if (status === "shadow_banned") return base + "bg-sky-950/40 text-sky-300 border-sky-900/50";
         if (status === "limit" || status === "stopped") return base + "bg-yellow-950/40 text-yellow-400 border-yellow-900/50";
         if (status === "checkpoint" || status === "in_progress") return base + "bg-amber-950/40 text-amber-400 border-amber-900/50";
         return base + "bg-zinc-800/50 text-zinc-300 border-zinc-700";
+      }
+
+      function getShadowBanRemainingMs(account) {
+        if (account.status !== "shadow_banned" || !account.shadow_ban_until) return 0;
+        return Math.max(new Date(account.shadow_ban_until).getTime() - Date.now(), 0);
+      }
+
+      function formatCountdown(ms) {
+        const totalSec = Math.floor(ms / 1000);
+        const hours = Math.floor(totalSec / 3600);
+        const minutes = Math.floor((totalSec % 3600) / 60);
+        const seconds = totalSec % 60;
+        const hh = String(hours).padStart(2, "0");
+        const mm = String(minutes).padStart(2, "0");
+        const ss = String(seconds).padStart(2, "0");
+        return `${hh}:${mm}:${ss}`;
+      }
+
+      function renderAccountStatus(account) {
+        const badge = `<span class="${statusBadge(account.status)}">${account.status}</span>`;
+        const leftMs = getShadowBanRemainingMs(account);
+        if (account.status !== "shadow_banned") return badge;
+        const timer = leftMs > 0 ? formatCountdown(leftMs) : "00:00:00";
+        return `
+          <div class="flex flex-col items-center gap-1 text-center">
+            ${badge}
+            <span
+              class="text-xs font-mono text-sky-300/90 shadow-ban-timer"
+              data-shadow-ban-until="${account.shadow_ban_until || ""}"
+            >таймер: ${timer}</span>
+          </div>
+        `;
+      }
+
+      function isRecentlyWarmed(account) {
+        if (!account.warmed_up_at) return false;
+        const warmedAtMs = new Date(account.warmed_up_at).getTime();
+        if (!Number.isFinite(warmedAtMs)) return false;
+        return Date.now() - warmedAtMs < 6 * 60 * 60 * 1000;
+      }
+
+      function warmupTooltip(account) {
+        if (!account.warmed_up_at) return "Прогрев не выполнялся";
+        const formatted = new Date(account.warmed_up_at).toLocaleString("ru-RU");
+        return `Последний прогрев: ${formatted}`;
+      }
+
+      function renderWarmupIndicator(account) {
+        const isRecent = isRecentlyWarmed(account);
+        const icon = isRecent
+          ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="h-4 w-4 text-emerald-400"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="m9 12 2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>`
+          : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="h-4 w-4 text-amber-300"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 6v6l4 2m4-2a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>`;
+        const label = isRecent ? "Недавно прогрет" : "Нужен прогрев";
+        return `<span class="inline-flex items-center" title="${escapeHtml(warmupTooltip(account))} • ${label}" aria-hidden="true">${icon}</span>`;
+      }
+
+      function renderWarmupButton(account) {
+        const loading = warmingAccountIds.has(account.id);
+        const disabled = loading || account.status !== "active";
+        const buttonText = loading
+          ? '<span class="inline-flex items-center gap-1"><span class="h-3 w-3 border border-zinc-300/70 border-t-transparent rounded-full animate-spin"></span><span>...</span></span>'
+          : "Прогрев";
+        const title = account.status === "active"
+          ? "Запустить прогрев аккаунта"
+          : "Прогрев доступен только для ACTIVE";
+        return `
+          <button
+            type="button"
+            onclick="warmupAccount(${account.id})"
+            ${disabled ? "disabled" : ""}
+            title="${title}"
+            class="h-8 px-2 text-[10px] whitespace-nowrap uppercase tracking-[0.08em] font-semibold rounded-md border border-zinc-700 bg-zinc-900/80 text-zinc-200 hover:bg-zinc-800 focus:outline-none focus:ring-1 focus:ring-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            ${buttonText}
+          </button>
+        `;
+      }
+
+      function refreshShadowBanTimers() {
+        const timers = Array.from(document.querySelectorAll(".shadow-ban-timer"));
+        timers.forEach((node) => {
+          const until = node.dataset.shadowBanUntil;
+          if (!until) {
+            node.textContent = "таймер: 00:00:00";
+            return;
+          }
+          const ms = Math.max(new Date(until).getTime() - Date.now(), 0);
+          node.textContent = `таймер: ${formatCountdown(ms)}`;
+        });
+      }
+
+      function showAccountEmailModal(accountId) {
+        const account = allAccounts.find((item) => item.id === Number(accountId));
+        if (!account) return;
+
+        activeAccountEmailId = account.id;
+        lastFocusedElement = document.activeElement;
+        document.getElementById("accountEmailAccountLogin").textContent = account.login || "-";
+        document.getElementById("accountEmailLoginInput").value = account.email_login || "";
+        document.getElementById("accountEmailPasswordInput").value = account.email_password || "";
+        setAccountEmailModalStatus("");
+        const modal = document.getElementById("accountEmailModal");
+        modal.classList.remove("hidden");
+        const loginInput = document.getElementById("accountEmailLoginInput");
+        if (loginInput) loginInput.focus();
+      }
+
+      function closeAccountEmailModal() {
+        const modal = document.getElementById("accountEmailModal");
+        modal.classList.add("hidden");
+        activeAccountEmailId = null;
+        setAccountEmailModalStatus("");
+        if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+          lastFocusedElement.focus();
+        }
+      }
+
+      function setAccountEmailModalStatus(message, tone = "neutral") {
+        const status = document.getElementById("accountEmailStatus");
+        if (!status) return;
+        status.textContent = message || "";
+        status.classList.remove("text-zinc-500", "text-emerald-400", "text-red-400");
+        if (tone === "success") {
+          status.classList.add("text-emerald-400");
+          return;
+        }
+        if (tone === "error") {
+          status.classList.add("text-red-400");
+          return;
+        }
+        status.classList.add("text-zinc-500");
+      }
+
+      async function saveAccountEmailModal() {
+        if (!activeAccountEmailId) return;
+        const saveBtn = document.getElementById("accountEmailSaveBtn");
+        const emailLoginInput = document.getElementById("accountEmailLoginInput");
+        const emailPasswordInput = document.getElementById("accountEmailPasswordInput");
+        if (!saveBtn || !emailLoginInput || !emailPasswordInput) return;
+
+        const payload = {
+          email_login: emailLoginInput.value.trim() || null,
+          email_password: emailPasswordInput.value.trim() || null,
+        };
+
+        const originalText = saveBtn.textContent;
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Сохраняем...";
+        setAccountEmailModalStatus("Сохраняем...", "neutral");
+
+        try {
+          const response = await fetch(`/api/accounts/${activeAccountEmailId}/email`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            setAccountEmailModalStatus(data.detail || "Не удалось сохранить данные", "error");
+            return;
+          }
+
+          const account = allAccounts.find((item) => item.id === activeAccountEmailId);
+          if (account) {
+            account.email_login = data.email_login ?? null;
+            account.email_password = data.email_password ?? null;
+          }
+          setAccountEmailModalStatus("Сохранено", "success");
+          await refreshAccounts();
+        } catch (error) {
+          console.error(error);
+          setAccountEmailModalStatus("Сетевая ошибка", "error");
+        } finally {
+          saveBtn.disabled = false;
+          saveBtn.textContent = originalText;
+        }
       }
 
       let allProxies = [];
       let allAccounts = [];
       const selectedAccountIds = new Set();
       const selectedProxyIds = new Set();
+      const warmingAccountIds = new Set();
+      let isBulkActionRunning = false;
+      let lastFocusedElement = null;
+      let activeAccountEmailId = null;
+
+      function setBulkActionStatus(message) {
+        const el = document.getElementById("bulkActionStatus");
+        if (el) el.textContent = message || "";
+      }
+
+      function updateBulkActionButtonsState() {
+        const hasSelection = selectedAccountIds.size > 0;
+        const ids = [
+          "bulkCheckLoginBtn",
+          "bulkShadowBanBtn",
+          "bulkShadowUnbanBtn",
+          "bulkBanBtn",
+        ];
+        ids.forEach((id) => {
+          const btn = document.getElementById(id);
+          if (!btn) return;
+          btn.disabled = isBulkActionRunning || !hasSelection;
+        });
+      }
 
       function toggleAccountSelection(accountId, checked) {
         if (checked) {
@@ -490,6 +801,7 @@
 
       function updateAccountSelectAllState() {
         const selectAll = document.getElementById("selectAllAccounts");
+        const selectedBadge = document.getElementById("selectedAccountsBadge");
         if (!selectAll) return;
         const checkboxes = Array.from(
           document.querySelectorAll('input[data-account-checkbox="1"]')
@@ -497,11 +809,15 @@
         if (checkboxes.length === 0) {
           selectAll.checked = false;
           selectAll.indeterminate = false;
+          if (selectedBadge) selectedBadge.textContent = "Выбрано: 0";
+          updateBulkActionButtonsState();
           return;
         }
         const selected = checkboxes.filter((checkbox) => checkbox.checked).length;
         selectAll.checked = selected === checkboxes.length;
         selectAll.indeterminate = selected > 0 && selected < checkboxes.length;
+        if (selectedBadge) selectedBadge.textContent = `Выбрано: ${selected}`;
+        updateBulkActionButtonsState();
       }
 
       function updateProxySelectAllState() {
@@ -551,35 +867,30 @@
           .map(
             (p) => `
             <tr class="border-t border-zinc-800 hover:bg-zinc-900/50 transition-colors">
-              <td class="w-12 py-2 pl-4 pr-2">
-                <input
-                  type="checkbox"
-                  data-proxy-checkbox="1"
-                  data-proxy-id="${p.id}"
-                  ${selectedProxyIds.has(p.id) ? "checked" : ""}
-                  onchange="toggleProxySelection(${p.id}, this.checked)"
-                  class="selection-check"
-                />
+              <td class="w-12 py-2 pl-4 pr-2 text-center">
+                <label class="touch-target mx-auto">
+                  <input
+                    type="checkbox"
+                    data-proxy-checkbox="1"
+                    data-proxy-id="${p.id}"
+                    ${selectedProxyIds.has(p.id) ? "checked" : ""}
+                    onchange="toggleProxySelection(${p.id}, this.checked)"
+                    class="selection-check"
+                  />
+                </label>
               </td>
-              <td class="py-2 pl-1 text-zinc-500 font-mono text-xs">${p.id}</td>
-              <td class="py-2 text-zinc-300 font-mono text-[10px]">
+              <td class="py-2 pl-1 text-zinc-500 font-mono text-xs text-center">${p.id}</td>
+              <td class="py-2 text-zinc-300 font-mono text-xs text-center">
                 <div class="text-emerald-400 font-bold uppercase tracking-tight mb-1">${p.name || ""}</div>
                 <div class="text-sky-400 font-bold">${p.session_id || "-"}</div>
                 <div class="text-zinc-500">${p.host}:${p.port}</div>
               </td>
-              <td class="py-2 text-zinc-400 text-xs italic">${p.in_use_by_account || "-"}</td>
-              <td class="py-2">
-                <button onclick="toggleProxy(${p.id})" title="Переключить статус" class="focus:outline-none active:scale-95 transition-all">
-                  <span class="${p.is_active ? 'text-emerald-400' : 'text-red-400'} text-[10px] uppercase font-bold tracking-tighter">
+              <td class="py-2 text-zinc-400 text-xs italic text-center">${p.in_use_by_account || "-"}</td>
+              <td class="py-2 text-center">
+                <button onclick="toggleProxy(${p.id})" title="Переключить статус" class="touch-target mx-auto rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500 active:scale-95 transition-all">
+                  <span class="${p.is_active ? 'text-emerald-400' : 'text-red-400'} text-xs uppercase font-bold tracking-tighter">
                     ${p.is_active ? 'Online' : 'Offline'}
                   </span>
-                </button>
-              </td>
-              <td class="py-2 pr-4 text-right">
-                <button onclick="deleteProxy(${p.id})" title="Удалить прокси" class="text-zinc-600 hover:text-red-400 focus:outline-none focus:text-red-400 active:scale-90 transition-all p-1">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
                 </button>
               </td>
             </tr>`
@@ -598,32 +909,136 @@
         renderProxiesTable(filtered);
       }
 
-      async function banAccount(accId) {
-        if (!confirm(`Пометить аккаунт #${accId} как Banned (Сдох)?`)) return;
-        await fetch(`/api/accounts/${accId}/ban`, { method: "POST" });
-        await refreshAccounts();
-      }
-
-      async function bulkDeleteAccounts() {
+      async function bulkBanAccounts() {
         const ids = Array.from(selectedAccountIds);
         if (!ids.length) {
-          alert("Выберите аккаунты для удаления.");
+          alert("Выберите аккаунты для массового Banned.");
           return;
         }
-        if (!confirm(`Удалить выбранные аккаунты: ${ids.length} шт.?`)) return;
+        if (!confirm(`Пометить как Banned: ${ids.length} аккаунтов?`)) return;
+        isBulkActionRunning = true;
+        updateBulkActionButtonsState();
+        setBulkActionStatus("Выполняю массовый перевод в banned...");
+        try {
+          const response = await fetch("/api/accounts/bulk_ban", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids }),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            alert(payload.detail || "Ошибка массового Banned");
+            return;
+          }
+          selectedAccountIds.clear();
+          setBulkActionStatus(`Готово: переведено в banned ${payload.updated ?? 0}`);
+          await Promise.all([refreshAccounts(), refreshTasks()]);
+        } finally {
+          isBulkActionRunning = false;
+          updateBulkActionButtonsState();
+        }
+      }
 
-        const response = await fetch("/api/accounts/bulk_delete", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids }),
-        });
-        const payload = await response.json();
-        if (!response.ok) {
-          alert(payload.detail || "Ошибка массового удаления аккаунтов");
+      async function bulkShadowBanAccounts() {
+        const ids = Array.from(selectedAccountIds);
+        if (!ids.length) {
+          alert("Выберите аккаунты для теневого бана.");
           return;
         }
-        selectedAccountIds.clear();
-        await Promise.all([refreshAccounts(), refreshTasks()]);
+        if (!confirm(`Поставить в теневой бан на 72ч: ${ids.length} аккаунтов?`)) return;
+        isBulkActionRunning = true;
+        updateBulkActionButtonsState();
+        setBulkActionStatus("Выполняю массовый теневой бан...");
+        try {
+          const response = await fetch("/api/accounts/bulk_shadow_ban", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids }),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            alert(payload.detail || "Ошибка массового теневого бана");
+            return;
+          }
+          selectedAccountIds.clear();
+          setBulkActionStatus(
+            `Готово: поставлено в теневой бан ${payload.updated ?? 0}`
+          );
+          await Promise.all([refreshAccounts(), refreshTasks()]);
+        } finally {
+          isBulkActionRunning = false;
+          updateBulkActionButtonsState();
+        }
+      }
+
+      async function bulkShadowUnbanAccounts() {
+        const ids = Array.from(selectedAccountIds);
+        if (!ids.length) {
+          alert("Выберите аккаунты для снятия теневого бана.");
+          return;
+        }
+        if (!confirm(`Снять теневой бан: ${ids.length} аккаунтов?`)) return;
+        isBulkActionRunning = true;
+        updateBulkActionButtonsState();
+        setBulkActionStatus("Снимаю теневой бан массово...");
+        try {
+          const response = await fetch("/api/accounts/bulk_shadow_unban", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids }),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            alert(payload.detail || "Ошибка массового снятия теневого бана");
+            return;
+          }
+          selectedAccountIds.clear();
+          setBulkActionStatus(
+            `Готово: снят теневой бан у ${payload.updated ?? 0}`
+          );
+          await Promise.all([refreshAccounts(), refreshTasks()]);
+        } finally {
+          isBulkActionRunning = false;
+          updateBulkActionButtonsState();
+        }
+      }
+
+      async function bulkCheckLoginAccounts() {
+        const ids = Array.from(selectedAccountIds);
+        if (!ids.length) {
+          alert("Выберите аккаунты для проверки входа.");
+          return;
+        }
+        if (!confirm(`Создать задачи check_login: ${ids.length} аккаунтов?`)) return;
+        isBulkActionRunning = true;
+        updateBulkActionButtonsState();
+        setBulkActionStatus("Создаю массовые задачи проверки входа...");
+        try {
+          const response = await fetch("/api/accounts/bulk_check_login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids }),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            alert(payload.detail || "Ошибка массовой проверки входа");
+            return;
+          }
+          selectedAccountIds.clear();
+          const skippedCount = Array.isArray(payload.skipped_not_active)
+            ? payload.skipped_not_active.length
+            : 0;
+          setBulkActionStatus(
+            `Готово: создано задач ${payload.created_tasks ?? 0}, пропущено неактивных ${skippedCount}`
+          );
+          alert(
+            `Добавлено задач: ${payload.created_tasks ?? 0}\nПропущено неактивных: ${skippedCount}`
+          );
+          await Promise.all([refreshAccounts(), refreshTasks()]);
+        } finally {
+          isBulkActionRunning = false;
+          updateBulkActionButtonsState();
+        }
       }
 
       async function bulkDeleteProxies() {
@@ -646,6 +1061,29 @@
         }
         selectedProxyIds.clear();
         await Promise.all([refreshProxies(), refreshAccounts()]);
+      }
+
+      async function warmupAccount(accountId) {
+        if (warmingAccountIds.has(accountId)) return;
+        warmingAccountIds.add(accountId);
+        await refreshAccounts();
+        try {
+          const response = await fetch(`/api/accounts/${accountId}/warmup`, {
+            method: "POST",
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            alert(payload.detail || "Ошибка прогрева");
+            return;
+          }
+          if (payload.status === "skipped") {
+            alert(payload.reason || "Прогрев пропущен");
+          }
+          await refreshAccounts();
+        } finally {
+          warmingAccountIds.delete(accountId);
+          await refreshAccounts();
+        }
       }
 
       async function updateAccountProxy(accId, proxyId) {
@@ -700,39 +1138,46 @@
               }).join("");              
               return `
               <tr class="border-t border-zinc-800 hover:bg-zinc-900/50 transition-colors">
-                <td class="w-12 py-2 pl-4 pr-2">
-                  <input
-                    type="checkbox"
-                    data-account-checkbox="1"
-                    data-account-id="${a.id}"
-                    ${selectedAccountIds.has(a.id) ? "checked" : ""}
-                    onchange="toggleAccountSelection(${a.id}, this.checked)"
-                    class="selection-check"
-                  />
+                <td class="w-8 py-2.5 pl-3 pr-1 text-center">
+                  <label class="touch-target mx-auto">
+                    <input
+                      type="checkbox"
+                      data-account-checkbox="1"
+                      data-account-id="${a.id}"
+                      ${selectedAccountIds.has(a.id) ? "checked" : ""}
+                      onchange="toggleAccountSelection(${a.id}, this.checked)"
+                      class="selection-check"
+                      aria-label="Выбрать аккаунт ${a.login}"
+                    />
+                  </label>
                 </td>
-                <td class="py-2 pl-1 text-zinc-500 font-mono text-xs">${a.id}</td>
-                <td class="py-2 text-zinc-200 font-semibold">${a.login}</td>
-                <td class="py-2">
-                  <select onchange="updateAccountProxy(${a.id}, this.value)" class="bg-zinc-950 border border-zinc-700 rounded px-1 py-1 text-[10px] text-zinc-300 w-40 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer">
+                <td class="py-3 pl-1 pr-2 text-zinc-500 font-mono text-xs text-center">${a.id}</td>
+                <td class="py-3 px-2 text-zinc-200 font-semibold text-center">
+                  <div class="flex items-center justify-center gap-1.5 min-w-0">
+                    <span class="truncate">${a.login}</span>
+                    <button
+                      type="button"
+                      onclick="showAccountEmailModal(${a.id})"
+                      class="touch-target-sm rounded-md hover:bg-zinc-800 transition-colors focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      title="Почта аккаунта"
+                      aria-label="Почта аккаунта ${a.login}"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-zinc-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M21.75 7.5v9A2.25 2.25 0 0 1 19.5 18.75h-15A2.25 2.25 0 0 1 2.25 16.5v-9m19.5 0A2.25 2.25 0 0 0 19.5 5.25h-15A2.25 2.25 0 0 0 2.25 7.5m19.5 0-8.69 5.212a2.25 2.25 0 0 1-2.32 0L2.25 7.5" />
+                      </svg>
+                    </button>
+                  </div>
+                </td>
+                <td class="py-3 px-2 text-center">
+                  <select onchange="updateAccountProxy(${a.id}, this.value)" class="bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 w-full min-w-0 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer text-center">
                     ${proxyOptions}
                   </select>
                 </td>
-                <td class="py-2"><span class="${statusBadge(a.status)}">${a.status}</span></td>
-                <td class="py-2 pr-4 text-right">
-                  <div class="flex items-center justify-end gap-1">
-                    <button onclick="checkLogin(${a.id})" aria-label="Проверить вход" title="Проверить вход" class="text-zinc-600 hover:text-sky-400 focus:outline-none focus:text-sky-400 active:scale-90 transition-all p-1">
-                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-                      </svg>
-                    </button>
-                    <button onclick="banAccount(${a.id})" aria-label="Пометить как Banned" title="Пометить как Banned" class="text-zinc-600 hover:text-amber-500 focus:outline-none focus:text-amber-500 active:scale-90 transition-all p-1">
-                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
-                    </button>
-                    <button onclick="deleteAccount(${a.id})" aria-label="Удалить аккаунт" class="text-zinc-600 hover:text-red-400 focus:outline-none focus:text-red-400 active:scale-90 transition-all p-1">
-                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
+                <td class="py-3 px-2 text-center">${renderAccountStatus(a)}</td>
+                <td class="py-3 pl-2 pr-4 text-center">
+                  <div class="flex items-center justify-center gap-1">
+                    ${renderWarmupIndicator(a)}
+                    ${renderWarmupButton(a)}
                   </div>
                 </td>
               </tr>`
@@ -740,6 +1185,7 @@
           )
           .join("");
         updateAccountSelectAllState();
+        refreshShadowBanTimers();
       }
 
       async function refreshTasks() {
@@ -750,7 +1196,7 @@
           .map(
             (t) => {
               const logsHtml = t.logs && t.logs.length 
-                ? `<div class="mt-2 text-[10px] bg-black/40 rounded p-2 border border-zinc-800 max-h-24 overflow-y-auto font-mono">
+                ? `<div class="mt-2 text-xs bg-black/40 rounded p-2 border border-zinc-800 max-h-56 overflow-y-auto font-mono">
                     ${t.logs.map(l => `<div class="mb-1 border-b border-zinc-800/50 pb-1 last:border-0 last:pb-0">
                       <span class="text-emerald-700/80 mr-1">${new Date(l.created_at).toLocaleTimeString()}</span> <span class="text-zinc-400">${escapeHtml(l.message)}</span>
                     </div>`).join("")}
@@ -767,12 +1213,12 @@
                   <td class="py-3 pr-2 max-w-[150px] break-all text-xs text-zinc-400">
                     <a href="${t.target_url}" target="_blank" class="hover:text-sky-400 underline decoration-zinc-700 transition-colors">${t.target_url}</a>
                   </td>
-                  <td class="py-3 pr-2 text-zinc-500 font-mono text-[10px] italic">${t.external_order_id ?? "-"}</td>
+                  <td class="py-3 pr-2 text-zinc-500 font-mono text-xs italic">${t.external_order_id ?? "-"}</td>
                   <td class="py-3 pr-4 text-right">
                     <div class="flex flex-col items-end gap-1">
                       <span class="${statusBadge(t.status)}">${t.status}</span>
                       ${(t.status === 'pending' || t.status === 'in_progress') 
-                        ? `<button onclick="stopTask(${t.id})" aria-label="Остановить задачу" class="text-[10px] bg-red-950/40 hover:bg-red-900 text-red-300 px-2 py-0.5 rounded border border-red-900/50 focus:outline-none focus:ring-1 focus:ring-red-500 active:scale-95 transition-all uppercase tracking-wider font-bold">Стоп</button>` 
+                        ? `<button onclick="stopTask(${t.id})" aria-label="Остановить задачу" class="h-9 text-[11px] bg-red-950/40 hover:bg-red-900 text-red-300 px-2 py-0.5 rounded border border-red-900/50 focus:outline-none focus:ring-1 focus:ring-red-500 active:scale-95 transition-all uppercase tracking-wider font-bold">Стоп</button>` 
                         : ''}
                     </div>
                   </td>
@@ -925,6 +1371,31 @@
         }
       });
 
+      const accountEmailModal = document.getElementById("accountEmailModal");
+      const proxyModal = document.getElementById("proxyModal");
+
+      accountEmailModal.addEventListener("click", (event) => {
+        if (event.target === accountEmailModal) {
+          closeAccountEmailModal();
+        }
+      });
+      proxyModal.addEventListener("click", (event) => {
+        if (event.target === proxyModal) {
+          proxyModal.classList.add("hidden");
+        }
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        if (!accountEmailModal.classList.contains("hidden")) {
+          closeAccountEmailModal();
+          return;
+        }
+        if (!proxyModal.classList.contains("hidden")) {
+          proxyModal.classList.add("hidden");
+        }
+      });
+
       actionType.addEventListener("change", toggleTextField);
       toggleTextField();
 
@@ -937,19 +1408,6 @@
       async function clearTasks() {
         if (!confirm("Вы уверены, что хотите полностью очистить историю задач?")) return;
         await fetch("/api/tasks/clear", { method: "POST" });
-        await refreshTasks();
-      }
-
-      async function deleteAccount(accId) {
-        if (!confirm(`Удалить аккаунт #${accId}? Это также удалит все связанные с ним задачи.`)) return;
-        await fetch(`/api/accounts/${accId}`, { method: "DELETE" });
-        selectedAccountIds.delete(accId);
-        await refreshAccounts();
-      }
-
-      async function checkLogin(accId) {
-        await fetch(`/api/accounts/${accId}/check_login`, { method: "POST" });
-        alert("Задача на проверку входа добавлена в очередь. Проверьте статус в таблице задач.");
         await refreshTasks();
       }
 
@@ -1028,6 +1486,7 @@
       }
 
       tick();
+      setInterval(refreshShadowBanTimers, 1000);
       setInterval(tick, 5000);
     </script>
   </body>

@@ -6,7 +6,7 @@ import os
 import random
 import secrets
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -37,6 +37,8 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 ALLOWED_GENDERS = {"M", "F", "ANY"}
 DAILY_ACTION_LIMIT = 15
+SHADOW_BAN_HOURS = 72
+WARMUP_RECENT_HOURS = 6
 security = HTTPBasic()
 
 
@@ -91,6 +93,11 @@ class AccountOut(BaseModel):
     gender: str
     daily_actions_count: int
     last_action_date: date | None
+    shadow_ban_started_at: datetime | None = None
+    shadow_ban_until: datetime | None = None
+    warmed_up_at: datetime | None = None
+    email_login: str | None = None
+    email_password: str | None = None
 
 
 def _parse_bool(value: str | None, *, default: bool = True) -> bool:
@@ -199,6 +206,9 @@ def _migrate_schema_if_needed(connection: Any) -> None:
     add_column_if_missing("accounts", "email_login", "TEXT")
     add_column_if_missing("accounts", "email_password", "TEXT")
     add_column_if_missing("accounts", "imap_server", "TEXT")
+    add_column_if_missing("accounts", "shadow_ban_started_at", "DATETIME")
+    add_column_if_missing("accounts", "shadow_ban_until", "DATETIME")
+    add_column_if_missing("accounts", "warmed_up_at", "DATETIME")
 
     # Приведение данных к правильным значениям Enum (имена членов - верхний регистр)
     connection.exec_driver_sql(
@@ -253,6 +263,10 @@ async def _get_active_account(
     action_type: TaskActionType | None = None,
     target_author_id: str | None = None,
 ) -> Account:
+    released = await _release_expired_shadow_bans(session)
+    if released:
+        await session.commit()
+
     normalized_target_gender = _normalize_gender(target_gender)
     normalized_author = _normalize_target_author_id(target_author_id)
     normalized_target_author_id = (
@@ -375,6 +389,30 @@ def _mark_account_action_success(account: Account) -> None:
         account.daily_actions_count = 1
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+async def _release_expired_shadow_bans(session: Any) -> int:
+    now = _utc_now()
+    stmt = select(Account).where(
+        Account.status == AccountStatus.SHADOW_BANNED,
+        Account.shadow_ban_until.is_not(None),
+        Account.shadow_ban_until <= now,
+    )
+    accounts = (await session.execute(stmt)).scalars().all()
+    if not accounts:
+        return 0
+
+    for account in accounts:
+        account.status = AccountStatus.ACTIVE
+        account.shadow_ban_started_at = None
+        account.shadow_ban_until = None
+        session.add(account)
+
+    return len(accounts)
+
+
 MTP_SEMAPHORE = asyncio.Semaphore(5)
 
 
@@ -448,6 +486,10 @@ async def _process_browser_task(session: Any, task: Task) -> bool:
     if task.status == TaskStatus.STOPPED:
         return True
 
+    released = await _release_expired_shadow_bans(session)
+    if released:
+        await session.commit()
+
     if not task.account_id:
         async with ACCOUNT_SELECTION_LOCK:
             try:
@@ -475,6 +517,34 @@ async def _process_browser_task(session: Any, task: Task) -> bool:
             .options(selectinload(Account.proxy))
             .where(Account.id == task.account_id)
         )
+        if account is None:
+            await _add_task_log(
+                session,
+                task.id,
+                "Назначенный аккаунт не найден. Освобождаю задачу для нового подбора.",
+            )
+            task.account_id = None
+            await session.commit()
+            return False
+
+        if account.status != AccountStatus.ACTIVE:
+            await _add_task_log(
+                session,
+                task.id,
+                f"Аккаунт {account.login} имеет статус {account.status.value} и пропускается.",
+            )
+            if task.action_type == TaskActionType.CHECK_LOGIN:
+                task.status = TaskStatus.ERROR
+                await _add_task_log(
+                    session,
+                    task.id,
+                    "Проверка входа отменена: выбранный аккаунт неактивен.",
+                )
+                await session.commit()
+                return True
+            task.account_id = None
+            await session.commit()
+            return False
 
     session_data = AccountSessionData(
         login=account.login,
@@ -659,6 +729,9 @@ async def browser_worker_loop() -> None:
 
             if len(active_tasks) < MAX_CONCURRENT_BROWSER_TASKS:
                 async with SessionLocal() as session:
+                    released = await _release_expired_shadow_bans(session)
+                    if released:
+                        await session.commit()
                     # Ищем задачи, которые еще не взяты в работу
                     stmt = (
                         select(Task.id)
@@ -791,6 +864,18 @@ class ProxyUpdateIn(BaseModel):
     proxy_id: int | None
 
 
+class AccountEmailUpdateIn(BaseModel):
+    email_login: str | None = None
+    email_password: str | None = None
+
+
+def _normalize_optional_str(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
 def _unique_positive_ids(ids: list[int]) -> list[int]:
     seen: set[int] = set()
     result: list[int] = []
@@ -839,6 +924,27 @@ async def update_account_proxy(
     return {"status": "success"}
 
 
+@app.put("/api/accounts/{account_id}/email")
+async def update_account_email(
+    account_id: int, payload: AccountEmailUpdateIn
+) -> dict[str, Any]:
+    async with SessionLocal() as session:
+        account = await session.scalar(select(Account).where(Account.id == account_id))
+        if not account:
+            raise HTTPException(status_code=404, detail="Аккаунт не найден")
+
+        account.email_login = _normalize_optional_str(payload.email_login)
+        account.email_password = _normalize_optional_str(payload.email_password)
+        session.add(account)
+        await session.commit()
+
+    return {
+        "status": "success",
+        "email_login": account.email_login,
+        "email_password": account.email_password,
+    }
+
+
 @app.post("/api/accounts/bulk_delete")
 async def bulk_delete_accounts(payload: BulkDeleteIn) -> dict[str, Any]:
     normalized_ids = _unique_positive_ids(payload.ids)
@@ -867,6 +973,157 @@ async def bulk_delete_accounts(payload: BulkDeleteIn) -> dict[str, Any]:
     return {
         "status": "success",
         "deleted": len(existing_id_set),
+        "not_found": not_found,
+    }
+
+
+@app.post("/api/accounts/bulk_ban")
+async def bulk_ban_accounts(payload: BulkDeleteIn) -> dict[str, Any]:
+    normalized_ids = _unique_positive_ids(payload.ids)
+    if not normalized_ids:
+        raise HTTPException(status_code=400, detail="Список ids пуст")
+
+    await _ensure_tables()
+    async with SessionLocal() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(Account).where(Account.id.in_(normalized_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        existing_id_set = {row.id for row in rows}
+        for account in rows:
+            account.status = AccountStatus.BANNED
+            account.shadow_ban_started_at = None
+            account.shadow_ban_until = None
+            session.add(account)
+        if rows:
+            await session.commit()
+
+    not_found = [item for item in normalized_ids if item not in existing_id_set]
+    return {
+        "status": "success",
+        "updated": len(existing_id_set),
+        "not_found": not_found,
+    }
+
+
+@app.post("/api/accounts/bulk_shadow_ban")
+async def bulk_shadow_ban_accounts(payload: BulkDeleteIn) -> dict[str, Any]:
+    normalized_ids = _unique_positive_ids(payload.ids)
+    if not normalized_ids:
+        raise HTTPException(status_code=400, detail="Список ids пуст")
+
+    now = _utc_now()
+    ban_until = now + timedelta(hours=SHADOW_BAN_HOURS)
+
+    await _ensure_tables()
+    async with SessionLocal() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(Account).where(Account.id.in_(normalized_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        existing_id_set = {row.id for row in rows}
+        for account in rows:
+            account.status = AccountStatus.SHADOW_BANNED
+            account.shadow_ban_started_at = now
+            account.shadow_ban_until = ban_until
+            session.add(account)
+        if rows:
+            await session.commit()
+
+    not_found = [item for item in normalized_ids if item not in existing_id_set]
+    return {
+        "status": "success",
+        "updated": len(existing_id_set),
+        "not_found": not_found,
+        "shadow_ban_until": ban_until.isoformat(),
+    }
+
+
+@app.post("/api/accounts/bulk_shadow_unban")
+async def bulk_shadow_unban_accounts(payload: BulkDeleteIn) -> dict[str, Any]:
+    normalized_ids = _unique_positive_ids(payload.ids)
+    if not normalized_ids:
+        raise HTTPException(status_code=400, detail="Список ids пуст")
+
+    await _ensure_tables()
+    async with SessionLocal() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(Account).where(Account.id.in_(normalized_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        existing_id_set = {row.id for row in rows}
+        for account in rows:
+            account.status = AccountStatus.ACTIVE
+            account.shadow_ban_started_at = None
+            account.shadow_ban_until = None
+            session.add(account)
+        if rows:
+            await session.commit()
+
+    not_found = [item for item in normalized_ids if item not in existing_id_set]
+    return {
+        "status": "success",
+        "updated": len(existing_id_set),
+        "not_found": not_found,
+    }
+
+
+@app.post("/api/accounts/bulk_check_login")
+async def bulk_check_login_accounts(payload: BulkDeleteIn) -> dict[str, Any]:
+    normalized_ids = _unique_positive_ids(payload.ids)
+    if not normalized_ids:
+        raise HTTPException(status_code=400, detail="Список ids пуст")
+
+    await _ensure_tables()
+    async with SessionLocal() as session:
+        all_rows = (
+            (
+                await session.execute(
+                    select(Account).where(Account.id.in_(normalized_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        existing_id_set = {row.id for row in all_rows}
+        active_rows = [row for row in all_rows if row.status == AccountStatus.ACTIVE]
+        skipped_not_active = [
+            row.id for row in all_rows if row.status != AccountStatus.ACTIVE
+        ]
+
+        for account in active_rows:
+            task = Task(
+                account_id=account.id,
+                action_type=TaskActionType.CHECK_LOGIN,
+                target_url="https://www.facebook.com/",
+                payload_text=None,
+                target_gender="ANY",
+                status=TaskStatus.PENDING,
+            )
+            session.add(task)
+        if active_rows:
+            await session.commit()
+
+    not_found = [item for item in normalized_ids if item not in existing_id_set]
+    return {
+        "status": "success",
+        "created_tasks": len(active_rows),
+        "skipped_not_active": skipped_not_active,
         "not_found": not_found,
     }
 
@@ -911,11 +1168,52 @@ async def mark_account_banned(account_id: int) -> dict[str, Any]:
             raise HTTPException(status_code=404, detail="Аккаунт не найден")
 
         account.status = AccountStatus.BANNED
+        account.shadow_ban_started_at = None
+        account.shadow_ban_until = None
         session.add(account)
         await session.commit()
     return {
         "status": "success",
         "message": "Аккаунт помечен как заблокированный (Banned)",
+    }
+
+
+@app.post("/api/accounts/{account_id}/shadow_ban")
+async def mark_account_shadow_banned(account_id: int) -> dict[str, Any]:
+    now = _utc_now()
+    ban_until = now + timedelta(hours=SHADOW_BAN_HOURS)
+    async with SessionLocal() as session:
+        account = await session.scalar(select(Account).where(Account.id == account_id))
+        if not account:
+            raise HTTPException(status_code=404, detail="Аккаунт не найден")
+
+        account.status = AccountStatus.SHADOW_BANNED
+        account.shadow_ban_started_at = now
+        account.shadow_ban_until = ban_until
+        session.add(account)
+        await session.commit()
+    return {
+        "status": "success",
+        "message": f"Аккаунт помечен как теневой бан на {SHADOW_BAN_HOURS}ч",
+        "shadow_ban_until": ban_until.isoformat(),
+    }
+
+
+@app.post("/api/accounts/{account_id}/shadow_unban")
+async def mark_account_shadow_unbanned(account_id: int) -> dict[str, Any]:
+    async with SessionLocal() as session:
+        account = await session.scalar(select(Account).where(Account.id == account_id))
+        if not account:
+            raise HTTPException(status_code=404, detail="Аккаунт не найден")
+
+        account.status = AccountStatus.ACTIVE
+        account.shadow_ban_started_at = None
+        account.shadow_ban_until = None
+        session.add(account)
+        await session.commit()
+    return {
+        "status": "success",
+        "message": "Теневой бан снят вручную",
     }
 
 
@@ -938,6 +1236,11 @@ async def check_account_login(account_id: int) -> dict[str, Any]:
         account = await session.scalar(select(Account).where(Account.id == account_id))
         if not account:
             raise HTTPException(status_code=404, detail="Аккаунт не найден")
+        if account.status != AccountStatus.ACTIVE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Аккаунт имеет статус {account.status.value} и не может участвовать в проверке входа.",
+            )
 
         task = Task(
             account_id=account.id,
@@ -952,6 +1255,74 @@ async def check_account_login(account_id: int) -> dict[str, Any]:
     return {"status": "success", "message": "Задача на проверку входа добавлена"}
 
 
+async def _warmup_account_impl(account_id: int) -> dict[str, Any]:
+    await _ensure_tables()
+    async with SessionLocal() as session:
+        account = await session.scalar(
+            select(Account)
+            .options(selectinload(Account.proxy))
+            .where(Account.id == account_id)
+        )
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if account.status != AccountStatus.ACTIVE:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Аккаунт имеет статус {account.status.value} "
+                    "и не может участвовать в прогреве."
+                ),
+            )
+
+        now = _utc_now()
+        if account.warmed_up_at:
+            warmed_up_at = account.warmed_up_at
+            if warmed_up_at.tzinfo is None:
+                warmed_up_at = warmed_up_at.replace(tzinfo=UTC)
+            hours_since = (now - warmed_up_at).total_seconds() / 3600
+            if hours_since < WARMUP_RECENT_HOURS:
+                return {
+                    "status": "skipped",
+                    "reason": f"Already warmed up {hours_since:.1f}h ago",
+                    "warmed_up_at": account.warmed_up_at,
+                }
+
+        browser = FacebookBrowser(
+            account=AccountSessionData(
+                login=account.login,
+                password=account.password,
+                user_agent=account.user_agent,
+                cookies=account.cookies,
+                storage_state=account.storage_state,
+                proxy=_proxy_from_account(account),
+                email_login=account.email_login,
+                email_password=account.email_password,
+                imap_server=account.imap_server,
+            )
+        )
+        await browser.start()
+        try:
+            await browser.login()
+            await browser.warmup(duration_seconds=random.randint(300, 600))
+            await _save_account_state(browser, account, session)
+            account.warmed_up_at = _utc_now()
+            session.add(account)
+            await session.commit()
+            return {"status": "done", "warmed_up_at": account.warmed_up_at}
+        finally:
+            await browser.stop()
+
+
+@app.post("/api/accounts/{account_id}/warmup")
+async def warmup_account(account_id: int) -> dict[str, Any]:
+    return await _warmup_account_impl(account_id)
+
+
+@app.post("/accounts/{account_id}/warmup")
+async def warmup_account_compat(account_id: int) -> dict[str, Any]:
+    return await _warmup_account_impl(account_id)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "index.html", {})
@@ -962,6 +1333,9 @@ async def get_accounts() -> list[AccountOut]:
     await _ensure_tables()
     today = date.today()
     async with SessionLocal() as session:
+        released = await _release_expired_shadow_bans(session)
+        if released:
+            await session.commit()
         rows = (
             (await session.execute(select(Account).order_by(Account.id.asc())))
             .scalars()
@@ -969,9 +1343,11 @@ async def get_accounts() -> list[AccountOut]:
         )
     result: list[AccountOut] = []
     for row in rows:
-        status_value = (
-            "limit" if _is_account_daily_limited(row, today=today) else row.status.value
-        )
+        status_value = row.status.value
+        if row.status == AccountStatus.ACTIVE and _is_account_daily_limited(
+            row, today=today
+        ):
+            status_value = "limit"
         result.append(
             AccountOut.model_validate(
                 {
@@ -982,6 +1358,11 @@ async def get_accounts() -> list[AccountOut]:
                     "gender": row.gender,
                     "daily_actions_count": row.daily_actions_count,
                     "last_action_date": row.last_action_date,
+                    "shadow_ban_started_at": row.shadow_ban_started_at,
+                    "shadow_ban_until": row.shadow_ban_until,
+                    "warmed_up_at": row.warmed_up_at,
+                    "email_login": row.email_login,
+                    "email_password": row.email_password,
                 }
             )
         )
@@ -1068,14 +1449,26 @@ async def create_task(payload: TaskCreate) -> TaskOut | list[TaskOut]:
                 assigned_account_id = (
                     payload.account_id if payload.quantity == 1 else None
                 )
+                manual_account = None
+                if assigned_account_id is not None:
+                    manual_account = await session.scalar(
+                        select(Account).where(Account.id == assigned_account_id)
+                    )
+                    if manual_account is None:
+                        raise HTTPException(
+                            status_code=404, detail="Аккаунт не найден"
+                        )
+                    if manual_account.status != AccountStatus.ACTIVE:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Аккаунт имеет статус {manual_account.status.value} и не может участвовать в задаче.",
+                        )
+
                 if (
                     payload.action_type == TaskActionType.REPLY_COMMENT
                     and assigned_account_id is not None
                     and target_author_id is not None
                 ):
-                    manual_account = await session.scalar(
-                        select(Account).where(Account.id == assigned_account_id)
-                    )
                     if (
                         manual_account is not None
                         and manual_account.login.strip().lower()

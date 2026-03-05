@@ -219,7 +219,9 @@ def extract_user_agent(text: str) -> str | None:
     return fallback
 
 
-def _parse_colon_credentials(lines: list[str]) -> tuple[str, str] | None:
+def _parse_colon_credentials(
+    lines: list[str],
+) -> tuple[str, str, str | None, str | None] | None:
     blocked_prefixes = (
         "id:",
         "name:",
@@ -343,7 +345,7 @@ def parse_account_text(
     if not credentials:
         match = _CRED_RE_TURKISH.search(content)
         if match:
-            credentials = (match.group(1), match.group(2))
+            credentials = (match.group(1), match.group(2), None, None)
 
     cookies = parse_netscape_cookies(lines)
 
@@ -382,6 +384,8 @@ def parse_account_text(
         cookies=cookies,
         user_agent=user_agent,
         gender=gender,
+        email_login=email_login,
+        email_password=email_password,
     )
 
 

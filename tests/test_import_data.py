@@ -113,6 +113,7 @@ def test_parse_account_text_cookie_only_uses_c_user_as_login() -> None:
     assert result.password == "__COOKIE_ONLY__"
     assert result.user_agent == "Mozilla/5.0 fallback"
     assert result.gender == "ANY"
+    assert result.cookies is not None
     assert len(result.cookies) == 2
 
 
@@ -135,6 +136,7 @@ def test_parse_account_text_supports_dolphin_json_format() -> None:
 
     assert result is not None
     assert result.login == "12345"
+    assert result.cookies is not None
     assert len(result.cookies) == 2
     assert result.cookies[0]["name"] == "c_user"
 
@@ -171,6 +173,24 @@ def test_parse_account_text_detects_gender_from_name_when_filename_has_no_marker
 
     assert result is not None
     assert result.gender == "M"
+
+
+def test_parse_account_text_keeps_email_credentials_from_colon_format() -> None:
+    from import_data import parse_account_text
+
+    content = "61580000000000:fb_pass:mail@example.com:mail-pass-777"
+    result = parse_account_text(
+        content=content,
+        source_name="acc.txt",
+        ua_fallback="Mozilla/5.0 fallback",
+        password_placeholder="pw",
+    )
+
+    assert result is not None
+    assert result.login == "61580000000000"
+    assert result.password == "fb_pass"
+    assert result.email_login == "mail@example.com"
+    assert result.email_password == "mail-pass-777"
 
 
 @pytest.mark.asyncio
