@@ -27,6 +27,7 @@ class Base(AsyncAttrs, DeclarativeBase):
 class AccountStatus(str, enum.Enum):
     ACTIVE = "active"
     BANNED = "banned"
+    SHADOW_BANNED = "shadow_banned"
     CHECKPOINT = "checkpoint"
     CAPTCHA_BLOCKED = "captcha_blocked"
 
@@ -94,6 +95,15 @@ class Account(Base):
     email_login: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
     imap_server: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    shadow_ban_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    shadow_ban_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    warmed_up_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     proxy: Mapped[Proxy | None] = relationship(back_populates="accounts")
     tasks: Mapped[list["Task"]] = relationship(
