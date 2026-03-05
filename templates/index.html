@@ -266,6 +266,7 @@
                 <button id="bulkShadowUnbanBtn" onclick="bulkShadowUnbanAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-emerald-950/50 hover:bg-emerald-900 text-emerald-300 rounded-md border border-emerald-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Снять теневой</button>
                 <button id="bulkUnassignProxyBtn" onclick="bulkUnassignProxyAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-indigo-950/50 hover:bg-indigo-900 text-indigo-300 rounded-md border border-indigo-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Снять прокси</button>
                 <button id="bulkBanBtn" onclick="bulkBanAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-amber-950/50 hover:bg-amber-900 text-amber-300 rounded-md border border-amber-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">В Бан</button>
+                <button id="bulkDeleteAccountsBtn" onclick="bulkDeleteAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-red-950/50 hover:bg-red-900 text-red-300 rounded-md border border-red-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Удалить выбранные</button>
                 <button id="bulkWarmupBtn" onclick="bulkWarmupAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-md border border-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Прогрев</button>
                 <button onclick="document.getElementById('accountFileInput').click()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-emerald-600 hover:bg-emerald-500 text-white rounded-md shadow-md shadow-emerald-900/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase">Загрузить .txt</button>
               </div>
@@ -290,7 +291,6 @@
                   <th scope="col" class="py-3 px-1 sm:px-2 font-semibold w-[32%] sm:w-[27%] text-center">Логин</th>
                   <th scope="col" class="py-3 px-1 sm:px-2 font-semibold w-[30%] sm:w-[25%] text-center">Прокси</th>
                   <th scope="col" class="py-3 px-1 sm:px-2 font-semibold w-[16%] sm:w-[14%] text-center">Статус</th>
-                  <th scope="col" class="py-3 pl-1 sm:pl-2 pr-2 sm:pr-4 font-semibold w-[22%] text-center">Прогрев</th>
                 </tr>
               </thead>
               <tbody id="accountsTable"></tbody>
@@ -578,50 +578,6 @@
         `;
       }
 
-      function isRecentlyWarmed(account) {
-        if (!account.warmed_up_at) return false;
-        const warmedAtMs = new Date(account.warmed_up_at).getTime();
-        if (!Number.isFinite(warmedAtMs)) return false;
-        return Date.now() - warmedAtMs < 6 * 60 * 60 * 1000;
-      }
-
-      function warmupTooltip(account) {
-        if (!account.warmed_up_at) return "Прогрев не выполнялся";
-        const formatted = new Date(account.warmed_up_at).toLocaleString("ru-RU");
-        return `Последний прогрев: ${formatted}`;
-      }
-
-      function renderWarmupIndicator(account) {
-        const isRecent = isRecentlyWarmed(account);
-        const icon = isRecent
-          ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="h-4 w-4 text-emerald-400"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="m9 12 2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>`
-          : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="h-4 w-4 text-amber-300"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 6v6l4 2m4-2a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>`;
-        const label = isRecent ? "Недавно прогрет" : "Нужен прогрев";
-        return `<span class="inline-flex items-center" title="${escapeHtml(warmupTooltip(account))} • ${label}" aria-hidden="true">${icon}</span>`;
-      }
-
-      function renderWarmupButton(account) {
-        const loading = warmingAccountIds.has(account.id);
-        const disabled = loading || account.status !== "active";
-        const buttonText = loading
-          ? '<span class="inline-flex items-center gap-1"><span class="h-3 w-3 border border-zinc-300/70 border-t-transparent rounded-full animate-spin"></span><span>...</span></span>'
-          : "Прогрев";
-        const title = account.status === "active"
-          ? "Запустить прогрев аккаунта"
-          : "Прогрев доступен только для ACTIVE";
-        return `
-          <button
-            type="button"
-            onclick="warmupAccount(${account.id})"
-            ${disabled ? "disabled" : ""}
-            title="${title}"
-            class="h-8 px-2 text-[10px] whitespace-nowrap uppercase tracking-[0.08em] font-semibold rounded-md border border-zinc-700 bg-zinc-900/80 text-zinc-200 hover:bg-zinc-800 focus:outline-none focus:ring-1 focus:ring-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            ${buttonText}
-          </button>
-        `;
-      }
-
       function refreshShadowBanTimers() {
         const timers = Array.from(document.querySelectorAll(".shadow-ban-timer"));
         timers.forEach((node) => {
@@ -726,7 +682,6 @@
       let allAccounts = [];
       const selectedAccountIds = new Set();
       const selectedProxyIds = new Set();
-      const warmingAccountIds = new Set();
       let isBulkActionRunning = false;
       let lastFocusedElement = null;
       let activeAccountEmailId = null;
@@ -744,6 +699,7 @@
           "bulkShadowUnbanBtn",
           "bulkUnassignProxyBtn",
           "bulkBanBtn",
+          "bulkDeleteAccountsBtn",
           "bulkWarmupBtn",
         ];
         ids.forEach((id) => {
@@ -1077,6 +1033,36 @@
         }
       }
 
+      async function bulkDeleteAccounts() {
+        const ids = Array.from(selectedAccountIds);
+        if (!ids.length) {
+          alert("Выберите аккаунты для удаления.");
+          return;
+        }
+        if (!confirm(`Удалить выбранные аккаунты: ${ids.length} шт.?`)) return;
+        isBulkActionRunning = true;
+        updateBulkActionButtonsState();
+        setBulkActionStatus("Удаляю выбранные аккаунты...");
+        try {
+          const response = await fetch("/api/accounts/bulk_delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids }),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            alert(payload.detail || "Ошибка массового удаления аккаунтов");
+            return;
+          }
+          selectedAccountIds.clear();
+          setBulkActionStatus(`Готово: удалено ${payload.deleted ?? 0}`);
+          await Promise.all([refreshAccounts(), refreshTasks(), refreshProxies()]);
+        } finally {
+          isBulkActionRunning = false;
+          updateBulkActionButtonsState();
+        }
+      }
+
       async function bulkWarmupAccounts() {
         const ids = Array.from(selectedAccountIds);
         if (!ids.length) {
@@ -1129,29 +1115,6 @@
         }
         selectedProxyIds.clear();
         await Promise.all([refreshProxies(), refreshAccounts()]);
-      }
-
-      async function warmupAccount(accountId) {
-        if (warmingAccountIds.has(accountId)) return;
-        warmingAccountIds.add(accountId);
-        await refreshAccounts();
-        try {
-          const response = await fetch(`/api/accounts/${accountId}/warmup`, {
-            method: "POST",
-          });
-          const payload = await response.json();
-          if (!response.ok) {
-            alert(payload.detail || "Ошибка прогрева");
-            return;
-          }
-          if (payload.status === "skipped") {
-            alert(payload.reason || "Прогрев пропущен");
-          }
-          await refreshAccounts();
-        } finally {
-          warmingAccountIds.delete(accountId);
-          await refreshAccounts();
-        }
       }
 
       async function updateAccountProxy(accId, proxyId) {
@@ -1242,12 +1205,6 @@
                   </select>
                 </td>
                 <td class="py-3 px-1 sm:px-2 text-center">${renderAccountStatus(a)}</td>
-                <td class="py-3 pl-1 sm:pl-2 pr-2 sm:pr-4 text-center">
-                  <div class="flex items-center justify-center gap-0.5 sm:gap-1">
-                    ${renderWarmupIndicator(a)}
-                    ${renderWarmupButton(a)}
-                  </div>
-                </td>
               </tr>`
             }
           )
