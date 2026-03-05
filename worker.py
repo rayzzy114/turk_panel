@@ -6,11 +6,14 @@ import os
 import random
 import re
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from imap_utils import get_facebook_code
 from camoufox.async_api import AsyncCamoufox
+from camoufox.exceptions import InvalidIP
 from playwright.async_api import (
+    Browser,
+    BrowserContext,
     Page,
 )
 
@@ -76,11 +79,11 @@ class FacebookBrowser:
         self.log_callback = log_callback
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
-        self._camoufox = None
+        self._playwright: Any | None = None
+        self._browser: Browser | None = None
+        self._context: BrowserContext | None = None
+        self._page: Page | None = None
+        self._camoufox: AsyncCamoufox | None = None
 
     async def _log(self, message: str) -> None:
         self.logger.info(message)
@@ -102,29 +105,79 @@ class FacebookBrowser:
 
     async def start(self) -> None:
         try:
-            proxy_kwargs = {}
+            launched = None
+            proxy_kwargs: dict[str, Any] = {}
             if self.account.proxy:
                 proxy_kwargs["proxy"] = self.account.proxy.to_playwright_proxy()
                 proxy_kwargs["geoip"] = True
 
-            self._camoufox = AsyncCamoufox(
-                headless=self.headless,
-                **proxy_kwargs,
-                # Camoufox takes care of stealth without patching
-            )
-            self._browser = await self._camoufox.__aenter__()
+            # 1) Normal launch
+            try:
+                self._camoufox = AsyncCamoufox(
+                    headless=self.headless,
+                    humanize=True,
+                    os=["windows", "macos"],
+                    **proxy_kwargs,
+                    # Camoufox takes care of stealth without patching
+                )
+                launched = await self._camoufox.__aenter__()
+            except InvalidIP:
+                # 2) Proxy IP introspection failed: retry with geoip disabled
+                if self._camoufox:
+                    await self._camoufox.__aexit__(None, None, None)
+                fallback_kwargs = dict(proxy_kwargs)
+                fallback_kwargs.pop("geoip", None)
+                self.logger.warning(
+                    "Camoufox geoip failed for %s. Retrying with geoip disabled.",
+                    self.account.login,
+                )
+                self._camoufox = AsyncCamoufox(
+                    headless=self.headless,
+                    humanize=True,
+                    os=["windows", "macos"],
+                    **fallback_kwargs,
+                )
+                launched = await self._camoufox.__aenter__()
+            except Exception as exc:
+                # 3) Headed mode on server without DISPLAY: force headless retry
+                if (
+                    not self.headless
+                    and "no DISPLAY environment variable specified" in str(exc)
+                ):
+                    if self._camoufox:
+                        await self._camoufox.__aexit__(None, None, None)
+                    self.logger.warning(
+                        "DISPLAY not found for %s. Retrying in headless mode.",
+                        self.account.login,
+                    )
+                    self._camoufox = AsyncCamoufox(
+                        headless=True,
+                        humanize=True,
+                        os=["windows", "macos"],
+                        **proxy_kwargs,
+                    )
+                    launched = await self._camoufox.__aenter__()
+                else:
+                    raise
 
             # Restore storage state if we have it
-            context_kwargs = {}
+            context_kwargs: dict[str, Any] = {}
             if self.account.storage_state:
                 context_kwargs["storage_state"] = self.account.storage_state
 
-            self._context = await self._browser.new_context(
-                locale="tr-TR",
-                timezone_id="Europe/Istanbul",
-                permissions=["notifications"],  # Разрешаем/запрещаем как человек
-                **context_kwargs,
-            )
+            # При прокси+geoip Camoufox сам подберет geo timezone/locale.
+            if self.account.proxy:
+                context_kwargs["permissions"] = ["notifications"]
+            else:
+                context_kwargs["locale"] = "tr-TR"
+                context_kwargs["timezone_id"] = "Europe/Istanbul"
+                context_kwargs["permissions"] = ["notifications"]
+
+            if hasattr(launched, "new_context"):
+                self._browser = cast(Browser, launched)
+                self._context = await self._browser.new_context(**context_kwargs)
+            else:
+                self._context = cast(BrowserContext, launched)
 
             self._page = await self._context.new_page()
             self._page.set_default_timeout(self.DEFAULT_TIMEOUT_MS)
@@ -140,9 +193,9 @@ class FacebookBrowser:
             raise RuntimeError("No page")
         return self._page
 
-    async def get_storage_state(self) -> dict | None:
+    async def get_storage_state(self) -> dict[str, Any] | None:
         if self._context:
-            return await self._context.storage_state()
+            return cast(dict[str, Any], await self._context.storage_state())
         return None
 
     async def close(self) -> None:
@@ -156,6 +209,10 @@ class FacebookBrowser:
                 await self._camoufox.__aexit__(None, None, None)
             except Exception:
                 pass
+
+    async def stop(self) -> None:
+        """Stops browser resources. Alias for close()."""
+        await self.close()
 
     async def _human_type(self, text: str) -> None:
         """Эмуляция человеческого набора текста: разные задержки, микропаузы."""
@@ -177,44 +234,160 @@ class FacebookBrowser:
                 delay += random.uniform(0.5, 1.5)
             await asyncio.sleep(delay)
 
-    async def _human_scroll(self, distance: int) -> None:
-        """Нелинейный скроллинг мыши"""
-        steps = random.randint(3, 8)
-        step_distance = distance / steps
-        for _ in range(steps):
-            await self.page.mouse.wheel(0, step_distance + random.uniform(-20, 20))
-            await asyncio.sleep(random.uniform(0.1, 0.4))
+    async def _human_scroll(self, distance: int = 400, *, times: int | None = None) -> None:
+        """Human-like scrolling via randomized step batches and pauses."""
+        loops = times if times is not None else 1
+        for _ in range(max(loops, 1)):
+            scroll_distance = (
+                random.randint(220, 620) if times is not None else distance
+            )
+            steps = random.randint(3, 8)
+            step_distance = scroll_distance / steps
+            for _ in range(steps):
+                await self.page.mouse.wheel(
+                    0,
+                    step_distance + random.uniform(-20, 20),
+                )
+                await asyncio.sleep(random.uniform(0.1, 0.4))
+            if times is not None:
+                await asyncio.sleep(random.uniform(0.7, 1.8))
 
-    async def _human_click(self, locator: Any) -> None:
-        """Клик с физикой мыши и защитой от исчезновения элемента."""
+    async def _human_click(self, locator: Any, *, randomize_start: bool = False) -> None:
+        """Human-paced click that relies on Camoufox native humanize trajectory."""
+        _ = randomize_start  # Backward compatibility for existing callsites.
         try:
             target = locator.first
             if not await target.is_visible(timeout=3000):
                 return
-
             await target.scroll_into_view_if_needed(timeout=3000)
-            await asyncio.sleep(random.uniform(0.5, 1.0))
-
-            box = await target.bounding_box()
-            if not box:
-                await target.click(force=True, timeout=3000)
-                return
-
-            await self.page.mouse.move(
-                box["x"] + box["width"] / 2 + random.uniform(-3, 3),
-                box["y"] + box["height"] / 2 + random.uniform(-3, 3),
-                steps=random.randint(10, 20),
-            )
-            await asyncio.sleep(random.uniform(0.1, 0.3))
-            await self.page.mouse.click(
-                box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
-            )
-        except Exception as e:
-            self.logger.warning("Ошибка при human-клике: %s", e)
+            await asyncio.sleep(random.uniform(0.25, 0.8))
+            await target.click(timeout=3000)
+        except Exception as exc:
+            self.logger.warning("Ошибка при human-клике: %s", exc)
             try:
                 await locator.first.click(force=True, timeout=2000)
             except Exception:
                 pass
+
+    async def _navigate_warmup(self, url: str, action_name: str) -> bool:
+        """Navigates for warmup actions and swallows transient navigation failures."""
+        try:
+            await self.page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=self.DEFAULT_TIMEOUT_MS,
+                referer=self.BASE_URL,
+            )
+            await self.page.wait_for_load_state("domcontentloaded", timeout=15000)
+            return True
+        except Exception as exc:
+            self.logger.warning("Warmup navigation failed (%s): %s", action_name, exc)
+            return False
+
+    async def _warmup_scroll_feed(self) -> None:
+        """Scrolls Facebook feed to emulate passive browsing behavior."""
+        try:
+            if not await self._navigate_warmup(self.BASE_URL, "_warmup_scroll_feed"):
+                return
+            feed = self.page.locator('[role="feed"], div[data-pagelet="FeedUnit_0"]').first
+            await feed.wait_for(state="visible", timeout=10_000)
+            await self._human_scroll(times=random.randint(3, 7))
+            await asyncio.sleep(random.uniform(2, 5))
+        except Exception as exc:
+            self.logger.warning("Warmup action _warmup_scroll_feed failed: %s", exc)
+
+    async def _warmup_like_random_post(self) -> None:
+        """Likes a random unliked post in feed with low frequency."""
+        try:
+            if not await self._navigate_warmup(self.BASE_URL, "_warmup_like_random_post"):
+                return
+            await self._human_scroll(times=2)
+            like_buttons = await self.page.locator(
+                '[aria-label="Like"][aria-pressed="false"],'
+                '[aria-label="Beğen"][aria-pressed="false"],'
+                '[aria-label="Нравится"][aria-pressed="false"]'
+            ).all()
+            if not like_buttons:
+                return
+            candidate = random.choice(like_buttons[:5])
+            await self._human_click(candidate)
+            await asyncio.sleep(random.uniform(2, 4))
+        except Exception as exc:
+            self.logger.warning("Warmup action _warmup_like_random_post failed: %s", exc)
+
+    async def _warmup_open_comments(self) -> None:
+        """Opens a random comment thread, scrolls briefly, then closes it."""
+        try:
+            if not await self._navigate_warmup(self.BASE_URL, "_warmup_open_comments"):
+                return
+            await self._human_scroll(times=random.randint(1, 3))
+            comment_buttons = await self.page.locator(
+                '[aria-label="Comment"],[aria-label="Yorum Yap"],[aria-label="Комментировать"]'
+            ).all()
+            if not comment_buttons:
+                return
+            candidate = random.choice(comment_buttons[:3])
+            await self._human_click(candidate)
+            await asyncio.sleep(random.uniform(3, 7))
+            await self._human_scroll(times=random.randint(1, 2))
+            await self.page.keyboard.press("Escape")
+        except Exception as exc:
+            self.logger.warning("Warmup action _warmup_open_comments failed: %s", exc)
+
+    async def _warmup_visit_profile(self) -> None:
+        """Visits own profile and performs lightweight scrolling."""
+        try:
+            if not await self._navigate_warmup(
+                "https://www.facebook.com/me", "_warmup_visit_profile"
+            ):
+                return
+            profile = self.page.locator(
+                'div[data-pagelet="ProfileTimeline"],[data-pagelet="ProfileCover"],main'
+            ).first
+            await profile.wait_for(state="visible", timeout=10_000)
+            await self._human_scroll(times=random.randint(2, 4))
+            await asyncio.sleep(random.uniform(2, 4))
+        except Exception as exc:
+            self.logger.warning("Warmup action _warmup_visit_profile failed: %s", exc)
+
+    async def _warmup_watch_reels(self) -> None:
+        """Opens reels and simulates watching two consecutive videos."""
+        try:
+            if not await self._navigate_warmup(
+                "https://www.facebook.com/reels/", "_warmup_watch_reels"
+            ):
+                return
+            video = self.page.locator("video").first
+            await video.wait_for(state="visible", timeout=10_000)
+            await asyncio.sleep(random.uniform(10, 25))
+            await self._human_scroll(times=1)
+            await asyncio.sleep(random.uniform(5, 12))
+        except Exception as exc:
+            self.logger.warning("Warmup action _warmup_watch_reels failed: %s", exc)
+
+    async def warmup(self, duration_seconds: int = 360) -> bool:
+        """Runs weighted warmup actions for the configured session duration."""
+        actions = [
+            self._warmup_scroll_feed,
+            self._warmup_scroll_feed,
+            self._warmup_scroll_feed,
+            self._warmup_watch_reels,
+            self._warmup_watch_reels,
+            self._warmup_like_random_post,
+            self._warmup_like_random_post,
+            self._warmup_open_comments,
+            self._warmup_visit_profile,
+        ]
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(duration_seconds, 1)
+        while loop.time() < deadline:
+            action = random.choice(actions)
+            try:
+                await action()
+            except Exception as exc:
+                self.logger.warning("Warmup action %s failed: %s", action.__name__, exc)
+            await asyncio.sleep(random.uniform(8, 20))
+        return True
 
     async def _pre_action_warmup(self) -> None:
         await self._log("Прогрев сессии на главной...")
@@ -252,7 +425,10 @@ class FacebookBrowser:
 
         if self.account.cookies and not self.account.storage_state:
             await self._log("Имеются только куки, пробую авторизоваться через них...")
-            await self._context.add_cookies(self.account.cookies)
+            if not self._context:
+                raise RuntimeError("Browser context is not initialized")
+            cookies_payload = cast(list[dict[str, Any]], self.account.cookies)
+            await self._context.add_cookies(cast(Any, cookies_payload))
             if await self._is_authorized():
                 await self._log("Авторизация по кукам успешна.")
                 return
@@ -332,9 +508,19 @@ class FacebookBrowser:
         await self._log(f"Переход к цели: {target_url}")
         try:
             await self.page.goto(
-                target_url, wait_until="domcontentloaded", referer=self.BASE_URL
+                target_url,
+                wait_until="domcontentloaded",
+                timeout=self.LOGIN_TIMEOUT_MS,
+                referer=self.BASE_URL,
             )
-            await asyncio.sleep(random.uniform(12, 20))
+            await self._log("Ожидаю догрузку страницы поста...")
+            wait_for_load_state = getattr(self.page, "wait_for_load_state", None)
+            if callable(wait_for_load_state):
+                try:
+                    await wait_for_load_state("networkidle", timeout=45_000)
+                except Exception:
+                    pass
+            await asyncio.sleep(random.uniform(18, 28))
             await self._dismiss_action_blockers()
             await self._raise_if_checkpoint("target navigation")
         except AccountCaptchaError:
@@ -377,7 +563,21 @@ class FacebookBrowser:
                         continue
             return None
 
-        input_field = await _find_comment_input()
+        input_field = None
+        for attempt in range(1, 4):
+            input_field = await _find_comment_input()
+            if input_field:
+                break
+            await self._log(
+                f"Поле ещё не появилось, жду догрузку ({attempt}/3)..."
+            )
+            wait_for_load_state = getattr(self.page, "wait_for_load_state", None)
+            if callable(wait_for_load_state):
+                try:
+                    await wait_for_load_state("networkidle", timeout=20_000)
+                except Exception:
+                    pass
+            await asyncio.sleep(random.uniform(3.0, 6.0))
         if not input_field:
             try:
                 post_dialog = self.page.locator('div[role="dialog"]').first
@@ -576,7 +776,7 @@ class FacebookBrowser:
 
         if btn:
             await self._log("Нажимаю Лайк (Deep Stealth)...")
-            await self._human_click(btn)
+            await self._human_click(btn, randomize_start=True)
             await self._post_action_simulation()
             return True
         return False
@@ -634,6 +834,8 @@ class FacebookBrowser:
             )
 
     async def _has_c_user_cookie(self) -> bool:
+        if not self._context:
+            return False
         cookies = await self._context.cookies()
         return any(cookie.get("name") == "c_user" for cookie in cookies)
 
