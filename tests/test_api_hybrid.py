@@ -227,3 +227,90 @@ async def test_parse_comments_with_limit(monkeypatch, tmp_path):
         data = response.json()
         assert data["status"] == "success"
         assert len(data["comments"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_accounts_import_endpoint_returns_per_line_results(monkeypatch, tmp_path):
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'import_lines.db'}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    await _seed_db(database_url)
+    importlib.reload(api_module)
+
+    transport = httpx.ASGITransport(app=api_module.app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        response = await client.post(
+            "/api/accounts/import",
+            json={
+                "raw_data": "\n".join(
+                    [
+                        "facebook giriş: 61581112340247 şifre: fbpass mail: user@example.com mail şifre: mailpass",
+                        "broken line",
+                    ]
+                )
+            },
+            headers=_auth_headers(),
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["imported"] == 1
+        assert payload["failed"] == 1
+        assert len(payload["lines"]) == 2
+        assert payload["lines"][0]["status"] == "ok"
+        assert payload["lines"][1]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_rotate_ip_endpoint_for_mobile_proxy(monkeypatch, tmp_path):
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'rotate_ip.db'}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+
+    engine = create_async_engine(database_url)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async_session = async_sessionmaker(engine, expire_on_commit=False)
+    async with async_session() as session:
+        proxy = Proxy(host="1.1.1.1", port=8080, user="u", password="p", is_active=True)
+        session.add(proxy)
+        await session.flush()
+        account = Account(
+            login="mobile_user",
+            password="p",
+            user_agent="ua",
+            status=AccountStatus.ACTIVE,
+            proxy_id=proxy.id,
+            proxy_type="mobile",
+            proxy_rotation_url="https://rotate.example.com",
+        )
+        session.add(account)
+        await session.commit()
+        await session.refresh(account)
+
+    async def _rotate(_: str) -> bool:
+        return True
+
+    async def _ip(_: str) -> str:
+        return "2.2.2.2"
+
+    monkeypatch.setattr(api_module, "rotate_mobile_ip", _rotate)
+    monkeypatch.setattr(api_module, "get_current_ip", _ip)
+    importlib.reload(api_module)
+    monkeypatch.setattr(api_module, "rotate_mobile_ip", _rotate)
+    monkeypatch.setattr(api_module, "get_current_ip", _ip)
+
+    transport = httpx.ASGITransport(app=api_module.app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        response = await client.post(
+            f"/api/accounts/{account.id}/rotate-ip",
+            headers=_auth_headers(),
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ok"
+        assert payload["new_ip"] == "2.2.2.2"
+
+    await engine.dispose()

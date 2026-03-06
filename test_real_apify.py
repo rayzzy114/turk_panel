@@ -39,7 +39,7 @@ async def test_zuck_post_with_replies():
                     print(
                         f"       {i}.{j} [{reply['author']}]: {reply['text'][:50]}..."
                     )
-            elif comment["replies_count"] > 0:
+            elif isinstance(comment["replies_count"], int) and comment["replies_count"] > 0:
                 print(
                     f"   --- Ответы есть ({comment['replies_count']}), но в этот раз не спарсились."
                 )

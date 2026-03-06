@@ -1,0 +1,5 @@
+# Project Local Instructions
+
+- Read `SESSION_CONTEXT.md` before doing a broad codebase scan. It is the fast-start map for new sessions.
+- Use `SESSION_CONTEXT.md` to reduce context load, but treat source files as the final authority before editing behavior.
+- If you materially change architecture, endpoints, data models, migrations, UI conventions, or verification commands, update `SESSION_CONTEXT.md` in the same task.

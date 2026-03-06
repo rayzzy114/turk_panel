@@ -5,10 +5,15 @@ import logging
 import os
 import random
 import re
+from datetime import UTC, datetime
+from pathlib import Path
+from time import perf_counter
 from dataclasses import dataclass
 from typing import Any, Final, cast
 
+from models import CheckpointType
 from imap_utils import get_facebook_code
+from iproxy_utils import get_current_ip, rotate_mobile_ip
 from camoufox.async_api import AsyncCamoufox
 from camoufox.exceptions import InvalidIP
 from playwright.async_api import (
@@ -36,22 +41,54 @@ class ProxyConfig:
             proxy["password"] = self.password
         return proxy
 
+    def to_proxy_url(self) -> str:
+        """Builds a proxy URL string for outbound HTTP client usage."""
+        if self.user and self.password:
+            return f"http://{self.user}:{self.password}@{self.host}:{self.port}"
+        return f"http://{self.host}:{self.port}"
+
 
 @dataclass(slots=True)
 class AccountSessionData:
     login: str
     password: str
     user_agent: str
+    account_id: int | None = None
     cookies: CookieList | None = None
     storage_state: dict[str, Any] | None = None
     proxy: ProxyConfig | None = None
     email_login: str | None = None
     email_password: str | None = None
     imap_server: str | None = None
+    proxy_type: str | None = None
+    proxy_rotation_url: str | None = None
 
 
 class AccountCaptchaError(RuntimeError):
     """Raised when Facebook blocks the session with a login wall/captcha."""
+
+
+class AccountCheckpointError(AccountCaptchaError):
+    """Raised when checkpoint flow is detected and not resolved automatically."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        checkpoint_type: CheckpointType,
+        screenshot_path: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.checkpoint_type = checkpoint_type
+        self.screenshot_path = screenshot_path
+
+
+class AccountBannedError(RuntimeError):
+    """Raised when Facebook indicates that the account is disabled."""
+
+
+class AccountInvalidCredentialsError(RuntimeError):
+    """Raised when Facebook explicitly reports invalid login credentials."""
 
 
 class FacebookBrowser:
@@ -65,6 +102,13 @@ class FacebookBrowser:
     CHECKPOINT_URL_RE: Final[re.Pattern[str]] = re.compile(
         r"/checkpoint/?", re.IGNORECASE
     )
+    WARMUP_ACTION_LABELS: Final[dict[str, str]] = {
+        "_warmup_scroll_feed": "Прокрутка ленты",
+        "_warmup_watch_reels": "Просмотр Reels",
+        "_warmup_like_random_post": "Лайк случайного поста",
+        "_warmup_open_comments": "Открытие комментариев",
+        "_warmup_visit_profile": "Переход в профиль",
+    }
 
     def __init__(
         self,
@@ -84,6 +128,8 @@ class FacebookBrowser:
         self._context: BrowserContext | None = None
         self._page: Page | None = None
         self._camoufox: AsyncCamoufox | None = None
+        self._last_checkpoint_type: CheckpointType | None = None
+        self._mobile_login_retry_used = False
 
     async def _log(self, message: str) -> None:
         self.logger.info(message)
@@ -95,6 +141,42 @@ class FacebookBrowser:
         if value is None:
             return default
         return value.strip().lower() in {"1", "true", "yes", "on"}
+
+    @property
+    def last_checkpoint_type(self) -> CheckpointType | None:
+        """Returns the most recent checkpoint type seen in this browser session."""
+        return self._last_checkpoint_type
+
+    def _is_mobile_proxy(self) -> bool:
+        return (self.account.proxy_type or "").strip().lower() == "mobile"
+
+    async def _rotate_mobile_proxy_if_needed(self, *, reason: str) -> None:
+        """Rotates mobile proxy and logs resulting external IP when available."""
+        if not self._is_mobile_proxy() or not self.account.proxy:
+            return
+
+        rotated = await rotate_mobile_ip(self.account.proxy_rotation_url or "")
+        if not rotated:
+            self.logger.warning(
+                "Mobile proxy rotation failed for %s (%s).",
+                self.account.login,
+                reason,
+            )
+            return
+
+        self.logger.info(
+            "Mobile proxy rotated for %s (%s). Waiting for stabilization...",
+            self.account.login,
+            reason,
+        )
+        await asyncio.sleep(2)
+        current_ip = await get_current_ip(self.account.proxy.to_proxy_url())
+        if current_ip:
+            self.logger.info(
+                "Mobile proxy current IP for %s: %s",
+                self.account.login,
+                current_ip,
+            )
 
     async def __aenter__(self) -> FacebookBrowser:
         await self.start()
@@ -110,6 +192,8 @@ class FacebookBrowser:
             if self.account.proxy:
                 proxy_kwargs["proxy"] = self.account.proxy.to_playwright_proxy()
                 proxy_kwargs["geoip"] = True
+
+            await self._rotate_mobile_proxy_if_needed(reason="before browser start")
 
             # 1) Normal launch
             try:
@@ -365,8 +449,21 @@ class FacebookBrowser:
         except Exception as exc:
             self.logger.warning("Warmup action _warmup_watch_reels failed: %s", exc)
 
-    async def warmup(self, duration_seconds: int = 360) -> bool:
-        """Runs weighted warmup actions for the configured session duration."""
+    async def warmup(self, duration_seconds: int = 360) -> dict[str, Any]:
+        """
+        Runs weighted warmup actions and returns detailed execution metrics.
+
+        Returns:
+            {
+                "result": "completed" | "error",
+                "actions_attempted": int,
+                "actions_succeeded": int,
+                "actions_failed": int,
+                "action_log": list[dict[str, Any]],
+                "error_message": str | None,
+                "duration_seconds": int,
+            }
+        """
         actions = [
             self._warmup_scroll_feed,
             self._warmup_scroll_feed,
@@ -378,16 +475,85 @@ class FacebookBrowser:
             self._warmup_open_comments,
             self._warmup_visit_profile,
         ]
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + max(duration_seconds, 1)
-        while loop.time() < deadline:
-            action = random.choice(actions)
-            try:
-                await action()
-            except Exception as exc:
-                self.logger.warning("Warmup action %s failed: %s", action.__name__, exc)
-            await asyncio.sleep(random.uniform(8, 20))
-        return True
+
+        result: dict[str, Any] = {
+            "result": "unknown",
+            "actions_attempted": 0,
+            "actions_succeeded": 0,
+            "actions_failed": 0,
+            "action_log": [],
+            "error_message": None,
+            "duration_seconds": 0,
+        }
+
+        started_at = perf_counter()
+        try:
+            await self._log(
+                f"Запускаю прогрев сессии на {max(duration_seconds, 1)} сек."
+            )
+            is_alive = await self._check_session_alive()
+            if not is_alive:
+                await self.login()
+
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + max(duration_seconds, 1)
+            while loop.time() < deadline:
+                if not await self._check_session_alive():
+                    raise AccountCaptchaError(
+                        "Warmup session is no longer authorized."
+                    )
+
+                action = random.choice(actions)
+                action_started = perf_counter()
+                action_name = action.__name__
+                action_label = self.WARMUP_ACTION_LABELS.get(action_name, action_name)
+                result["actions_attempted"] += 1
+                action_entry: dict[str, Any] = {
+                    "action": action_name,
+                    "status": "ok",
+                    "duration_ms": 0,
+                    "error": None,
+                }
+
+                try:
+                    await self._log(f"Прогрев: старт действия {action_label}.")
+                    await action()
+                    result["actions_succeeded"] += 1
+                except Exception as exc:
+                    action_entry["status"] = "failed"
+                    action_entry["error"] = str(exc)
+                    result["actions_failed"] += 1
+                    self.logger.warning("Warmup action %s failed: %s", action_name, exc)
+                finally:
+                    action_entry["duration_ms"] = int(
+                        max(0, (perf_counter() - action_started) * 1000)
+                    )
+                    cast(list[dict[str, Any]], result["action_log"]).append(action_entry)
+                    if action_entry["status"] == "ok":
+                        await self._log(
+                            "Прогрев: "
+                            f"{action_label} успешно завершено за {action_entry['duration_ms']} мс."
+                        )
+                    else:
+                        await self._log(
+                            "Прогрев: "
+                            f"{action_label} завершилось ошибкой за {action_entry['duration_ms']} мс: "
+                            f"{action_entry['error']}"
+                        )
+
+                await asyncio.sleep(random.uniform(8, 20))
+
+            result["result"] = "completed"
+            await self._log("Прогрев завершен успешно.")
+        except Exception as exc:
+            result["result"] = "error"
+            result["error_message"] = str(exc)
+            self.logger.warning("Warmup flow failed for %s: %s", self.account.login, exc)
+            await self._log(f"Прогрев завершился ошибкой: {exc}")
+        finally:
+            result["duration_seconds"] = int(max(1, perf_counter() - started_at))
+
+        return result
 
     async def _pre_action_warmup(self) -> None:
         await self._log("Прогрев сессии на главной...")
@@ -418,7 +584,8 @@ class FacebookBrowser:
         except Exception:
             pass
 
-    async def login(self) -> None:
+    async def _login_once(self) -> None:
+        """Performs a single login attempt using session state or credentials."""
         if await self._is_authorized():
             await self._log("Авторизация успешна (storage_state/cookies активны).")
             return
@@ -437,6 +604,9 @@ class FacebookBrowser:
         await self._log("Сессия не найдена, вхожу по логину...")
         await self.page.goto(self.BASE_URL, wait_until="domcontentloaded")
         await asyncio.sleep(random.uniform(4, 8))
+
+        if await self._handle_saved_profile_login():
+            return
 
         # Человеческий ввод логина
         email_field = self.page.locator('input[name="email"]')
@@ -462,11 +632,168 @@ class FacebookBrowser:
             raise AccountCaptchaError("Checkpoint detected during login.")
 
         if not await self._is_authorized():
+            await self._raise_if_invalid_credentials("login")
             raise AccountCaptchaError(
                 "Не удалось авторизоваться после ввода логина/пароля."
             )
 
         await self._log("Успешный вход по логину и паролю.")
+
+    async def _handle_saved_profile_login(self) -> bool:
+        """Handles Facebook saved-profile login walls that ask only for the password."""
+        async def _find_named_action(pattern: re.Pattern[str]) -> Any | None:
+            for role in ("button", "link"):
+                try:
+                    locator = self.page.get_by_role(role, name=pattern).first
+                    if await locator.count() > 0 and await locator.is_visible(timeout=1500):
+                        return locator
+                except Exception:
+                    continue
+            return None
+
+        email_field = self.page.locator(
+            'input[name="email"], input[autocomplete="username"]'
+        ).first
+        try:
+            if await email_field.count() > 0 and await email_field.is_visible(timeout=800):
+                return False
+        except Exception:
+            pass
+
+        has_profile_avatar = False
+        avatar_selectors = [
+            'img[alt][src*="scontent"]',
+            'div[role="dialog"] img',
+            'img[width="80"]',
+            'img[height="80"]',
+        ]
+        for selector in avatar_selectors:
+            try:
+                avatar = self.page.locator(selector).first
+                if await avatar.count() > 0 and await avatar.is_visible(timeout=800):
+                    has_profile_avatar = True
+                    break
+            except Exception:
+                continue
+
+        try:
+            body_text = (await self.page.inner_text("body") or "").lower()
+        except Exception:
+            try:
+                body_text = (await self.page.content() or "").lower()
+            except Exception:
+                body_text = ""
+
+        saved_profile_markers = [
+            "başka bir profil kullan",
+            "baska bir profil kullan",
+            "use another profile",
+            "log into another account",
+        ]
+        has_saved_profile_marker = any(
+            marker in body_text for marker in saved_profile_markers
+        )
+
+        password_field = self.page.locator(
+            "input[type='password'], input[name='pass']"
+        ).first
+        if not (has_profile_avatar or has_saved_profile_marker):
+            return False
+        if await password_field.count() == 0:
+            continue_button = await _find_named_action(
+                re.compile(r"Devam|Continue|Log In|Giriş Yap", re.IGNORECASE)
+            )
+            if continue_button is not None:
+                await self._log(
+                    "Обнаружен экран сохраненного профиля. Открываю форму пароля..."
+                )
+                await self._human_click(continue_button)
+                await asyncio.sleep(random.uniform(2, 4))
+            password_field = self.page.locator(
+                "input[type='password'], input[name='pass']"
+            ).first
+
+        if await password_field.count() == 0 or not await password_field.is_visible(
+            timeout=1500
+        ):
+            return False
+
+        await self._log("Facebook запрашивает только пароль сохраненного профиля.")
+        await password_field.click()
+        await self._human_type(self.account.password)
+        await asyncio.sleep(random.uniform(1.0, 2.5))
+
+        submit_button = await _find_named_action(
+            re.compile(r"Giriş Yap|Log In|Continue|Devam", re.IGNORECASE)
+        )
+        if submit_button is not None:
+            await self._human_click(submit_button)
+        else:
+            await self.page.keyboard.press("Enter")
+
+        await asyncio.sleep(random.uniform(10, 20))
+        await self._raise_if_checkpoint("login")
+        await self._raise_if_invalid_credentials("saved profile login")
+
+        if await self.page.locator('form[action*="login"]').count() > 0:
+            await self._log("ВНИМАНИЕ: Facebook требует проверку (капча/пароль).")
+            raise AccountCaptchaError("Checkpoint detected during login.")
+
+        if not await self._is_authorized():
+            await self._raise_if_invalid_credentials("saved profile login")
+            raise AccountCaptchaError(
+                "Не удалось авторизоваться после ввода пароля сохраненного профиля."
+            )
+
+        await self._log("Успешный вход через сохраненный профиль.")
+        return True
+
+    async def _raise_if_invalid_credentials(self, stage: str) -> None:
+        """Raises when Facebook explicitly reports wrong password/invalid credentials."""
+        try:
+            body_text = (await self.page.inner_text("body") or "").lower()
+        except Exception:
+            try:
+                body_text = (await self.page.content() or "").lower()
+            except Exception:
+                return
+
+        invalid_patterns = [
+            "girdiğin şifre yanlış",
+            "girdigin sifre yanlis",
+            "incorrect password",
+            "wrong password",
+            "the password that you've entered is incorrect",
+            "the password you entered is incorrect",
+            "yanlış şifre",
+            "yanlis sifre",
+        ]
+        if any(pattern in body_text for pattern in invalid_patterns):
+            raise AccountInvalidCredentialsError(
+                f"Facebook rejected login credentials during {stage}."
+            )
+
+    async def login(self) -> None:
+        """Logs in and retries once with IP rotation for mobile proxies on checkpoint/captcha."""
+        try:
+            await self._login_once()
+            return
+        except (AccountCheckpointError, AccountCaptchaError):
+            if not self._is_mobile_proxy() or self._mobile_login_retry_used:
+                raise
+
+            self._mobile_login_retry_used = True
+            self.logger.warning(
+                "Login failed for %s under mobile proxy. Rotating IP and retrying once.",
+                self.account.login,
+            )
+            await self._rotate_mobile_proxy_if_needed(reason="login retry after captcha")
+            if self._context:
+                try:
+                    await self._context.clear_cookies()
+                except Exception:
+                    pass
+            await self._login_once()
 
     async def _close_dialogs(self) -> None:
         try:
@@ -505,6 +832,11 @@ class FacebookBrowser:
 
     async def leave_comment(self, target_url: str, text: str) -> bool:
         await self._pre_action_warmup()
+        if (
+            not await self._check_session_alive()
+            and not self.CHECKPOINT_URL_RE.search(self.page.url or "")
+        ):
+            await self.login()
         await self._log(f"Переход к цели: {target_url}")
         try:
             await self.page.goto(
@@ -675,6 +1007,11 @@ class FacebookBrowser:
 
     async def like_comment(self, target_url: str) -> bool:
         await self._pre_action_warmup()
+        if (
+            not await self._check_session_alive()
+            and not self.CHECKPOINT_URL_RE.search(self.page.url or "")
+        ):
+            await self.login()
         await self._log(f"Переход к цели: {target_url}")
         try:
             await self.page.goto(
@@ -784,6 +1121,36 @@ class FacebookBrowser:
     async def reply_comment(self, target_url: str, text: str) -> bool:
         return await self.leave_comment(target_url, text)
 
+    async def _has_login_wall(self) -> bool:
+        """Detects explicit Facebook login walls even if stale cookies still exist."""
+        try:
+            if await self.page.locator('form[action*="login"]').count() > 0:
+                return True
+        except Exception:
+            pass
+
+        try:
+            body_text = (await self.page.inner_text("body") or "").lower()
+        except Exception:
+            try:
+                body_text = (await self.page.content() or "").lower()
+            except Exception:
+                body_text = ""
+
+        login_wall_markers = [
+            "başka bir profil kullan",
+            "baska bir profil kullan",
+            "yeni hesap oluştur",
+            "yeni hesap olustur",
+            "şifreni mi unuttun",
+            "sifreni mi unuttun",
+            "forgotten password",
+            "use another profile",
+            "log into another account",
+            "create new account",
+        ]
+        return any(marker in body_text for marker in login_wall_markers)
+
     async def _is_authorized(self) -> bool:
         try:
             # Не переходим на главную если мы уже там
@@ -791,12 +1158,72 @@ class FacebookBrowser:
                 await self.page.goto(self.BASE_URL, wait_until="domcontentloaded")
             if self.CHECKPOINT_URL_RE.search(self.page.url or ""):
                 return False
+            if await self._has_login_wall():
+                return False
             return await self._has_c_user_cookie()
         except Exception:
             return False
 
+    async def _check_session_alive(self) -> bool:
+        """
+        Checks whether the current browser session is still authorized.
+
+        If session appears dead, it attempts to restore cookies from storage_state.
+        Returns True if session is alive or restored, otherwise False.
+        """
+        try:
+            await self.page.goto(
+                self.BASE_URL,
+                wait_until="domcontentloaded",
+                timeout=self.DEFAULT_TIMEOUT_MS,
+            )
+            if self.CHECKPOINT_URL_RE.search(self.page.url or ""):
+                return False
+
+            if await self._has_login_wall():
+                return False
+
+            if await self._has_c_user_cookie():
+                return True
+        except Exception as exc:
+            self.logger.warning(
+                "Session aliveness check failed for %s: %s",
+                self.account.login,
+                exc,
+            )
+
+        if not self._context or not self.account.storage_state:
+            return False
+
+        try:
+            cookies = self.account.storage_state.get("cookies", [])
+            if cookies:
+                await self._context.add_cookies(cookies)
+            await self.page.goto(
+                self.BASE_URL,
+                wait_until="domcontentloaded",
+                timeout=self.DEFAULT_TIMEOUT_MS,
+            )
+            return (
+                not self.CHECKPOINT_URL_RE.search(self.page.url or "")
+                and not await self._has_login_wall()
+                and await self._has_c_user_cookie()
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "Session restore from storage_state failed for %s: %s",
+                self.account.login,
+                exc,
+            )
+            return False
+
     async def like_post(self, target_url: str) -> bool:
         await self._pre_action_warmup()
+        if (
+            not await self._check_session_alive()
+            and not self.CHECKPOINT_URL_RE.search(self.page.url or "")
+        ):
+            await self.login()
         try:
             await self.page.goto(
                 target_url, wait_until="domcontentloaded", referer=self.BASE_URL
@@ -824,13 +1251,44 @@ class FacebookBrowser:
             await self._log(
                 f"CHECKPOINT: Facebook запросил подтверждение личности на этапе '{stage}': {current_url}"
             )
-            if await self._wait_for_checkpoint_resolution():
+            try:
+                resolved = await self._wait_for_checkpoint_resolution()
+            except AccountCheckpointError:
+                if self._is_mobile_proxy() and not self._mobile_login_retry_used:
+                    self._mobile_login_retry_used = True
+                    self.logger.info(
+                        "Mobile proxy checkpoint recovery for %s at %s.",
+                        self.account.login,
+                        stage,
+                    )
+                    await self._rotate_mobile_proxy_if_needed(
+                        reason=f"checkpoint recovery ({stage})"
+                    )
+                    await self.login()
+                    return
+                raise
+
+            if resolved:
                 await self._log(
                     "CHECKPOINT: подтверждение пройдено вручную, продолжаю выполнение."
                 )
                 return
-            raise AccountCaptchaError(
-                f"Checkpoint detected during {stage}: {current_url}"
+            if self._is_mobile_proxy() and not self._mobile_login_retry_used:
+                self._mobile_login_retry_used = True
+                self.logger.info(
+                    "Mobile proxy unresolved checkpoint recovery for %s at %s.",
+                    self.account.login,
+                    stage,
+                )
+                await self._rotate_mobile_proxy_if_needed(
+                    reason=f"unresolved checkpoint ({stage})"
+                )
+                await self.login()
+                return
+            checkpoint_type = self._last_checkpoint_type or CheckpointType.UNKNOWN_CHECKPOINT
+            raise AccountCheckpointError(
+                f"Checkpoint detected during {stage}: {current_url}",
+                checkpoint_type=checkpoint_type,
             )
 
     async def _has_c_user_cookie(self) -> bool:
@@ -839,13 +1297,115 @@ class FacebookBrowser:
         cookies = await self._context.cookies()
         return any(cookie.get("name") == "c_user" for cookie in cookies)
 
+    async def detect_checkpoint_type(self) -> CheckpointType:
+        """
+        Classifies Facebook checkpoint subtype by visible body text.
+
+        Returns UNKNOWN_CHECKPOINT on any parsing failure.
+        """
+        try:
+            body_text = await self.page.inner_text("body")
+        except Exception:
+            try:
+                body_text = await self.page.content()
+            except Exception as exc:
+                self.logger.warning(
+                    "Failed to read checkpoint page body for %s: %s",
+                    self.account.login,
+                    exc,
+                )
+                return CheckpointType.UNKNOWN_CHECKPOINT
+
+        normalized = (body_text or "").lower()
+        snippet = normalized[:300]
+        self.logger.debug(
+            "Checkpoint page snippet for %s: %s",
+            self.account.login,
+            snippet,
+        )
+
+        patterns: list[tuple[CheckpointType, tuple[str, ...]]] = [
+            (
+                CheckpointType.CODE_VERIFICATION,
+                (
+                    "güvenlik kodu",
+                    "doğrulama kodu",
+                    "onay kodu",
+                    "security code",
+                    "confirmation code",
+                ),
+            ),
+            (
+                CheckpointType.FACE_VERIFICATION,
+                (
+                    "kimliğini doğrula",
+                    "yüzünün fotoğrafı",
+                    "selfie",
+                    "kimlik belgesi",
+                    "confirm your identity",
+                    "photo of your face",
+                    "identity document",
+                ),
+            ),
+            (
+                CheckpointType.SUSPICIOUS_LOGIN,
+                (
+                    "olağandışı giriş",
+                    "başka birinin hesabına",
+                    "unusual login",
+                    "someone else",
+                ),
+            ),
+            (
+                CheckpointType.ACCOUNT_DISABLED,
+                (
+                    "hesabın devre dışı",
+                    "engellendi",
+                    "account disabled",
+                    "has been blocked",
+                ),
+            ),
+        ]
+        for checkpoint_type, keywords in patterns:
+            if any(keyword in normalized for keyword in keywords):
+                return checkpoint_type
+        return CheckpointType.UNKNOWN_CHECKPOINT
+
     async def _wait_for_checkpoint_resolution(self) -> bool:
+        """Dispatches checkpoint handling strategy based on detected checkpoint type."""
+        checkpoint_type = await self.detect_checkpoint_type()
+        self._last_checkpoint_type = checkpoint_type
+        self.logger.info(
+            "Checkpoint type detected: %s for account %s",
+            checkpoint_type.value,
+            self.account.login,
+        )
+
+        if checkpoint_type == CheckpointType.CODE_VERIFICATION:
+            return await self._handle_code_checkpoint()
+
+        if checkpoint_type == CheckpointType.FACE_VERIFICATION:
+            return await self._handle_face_checkpoint()
+
+        if checkpoint_type == CheckpointType.ACCOUNT_DISABLED:
+            raise AccountBannedError("Account is disabled by Facebook")
+
+        if checkpoint_type == CheckpointType.SUSPICIOUS_LOGIN:
+            return await self._handle_code_checkpoint()
+
+        self.logger.warning(
+            "Unknown checkpoint for account %s, falling back to manual wait.",
+            self.account.login,
+        )
+        return await self._legacy_manual_wait()
+
+    async def _handle_code_checkpoint(self) -> bool:
+        """Attempts to auto-pass code checkpoint using email and falls back to manual wait."""
         await self._log(
             "Обнаружен CHECKPOINT. Пробуем автоматическое подтверждение по почте..."
         )
 
         try:
-            # 1. Проверяем, есть ли опция отправки кода на почту
             send_code_btn = self.page.get_by_text(
                 re.compile(r"Отправить код по|Send code to|Kodu gönder", re.IGNORECASE)
             )
@@ -860,7 +1420,6 @@ class FacebookBrowser:
                     await self._human_click(next_btn.first)
                     await self.page.wait_for_load_state("networkidle")
 
-            # 2. Если мы на странице ввода 6/8-значного кода и у нас есть почта
             code_input = self.page.locator(
                 "input[name='captcha_response'], input[name='code']"
             )
@@ -873,7 +1432,6 @@ class FacebookBrowser:
                     f"Ждем письмо от Facebook на {self.account.email_login}..."
                 )
 
-                # Запускаем поиск письма
                 code = await get_facebook_code(
                     email_login=self.account.email_login,
                     email_password=self.account.email_password,
@@ -896,11 +1454,8 @@ class FacebookBrowser:
                     if await submit_btn.count() > 0:
                         await self._human_click(submit_btn.first)
                         await self.page.wait_for_load_state("networkidle")
-
-                        # Даем время на редирект
                         await asyncio.sleep(5)
-
-                        if not self.CHECKPOINT_URL_RE.search(self.page.url):
+                        if not self.CHECKPOINT_URL_RE.search(self.page.url or ""):
                             await self._log("Чекпоинт успешно пройден!")
                             return True
                 else:
@@ -909,12 +1464,47 @@ class FacebookBrowser:
                 await self._log(
                     f"Требуется код подтверждения, но данные от почты не указаны: {self.account.login}"
                 )
-        except Exception as e:
+        except Exception as exc:
             await self._log(
-                f"Ошибка при попытке автоматического прохождения чекпоинта: {e}"
+                f"Ошибка при попытке автоматического прохождения чекпоинта: {exc}"
             )
 
-        # Fallback to manual resolution if auto fails or is not available
+        return await self._legacy_manual_wait()
+
+    async def _handle_face_checkpoint(self) -> bool:
+        """
+        Handles face/ID verification checkpoint.
+
+        This checkpoint is not automatable, so it captures a screenshot and raises.
+        """
+        screenshots_dir = Path("./screenshots")
+        screenshots_dir.mkdir(exist_ok=True)
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+        account_id = self.account.account_id or "unknown"
+        screenshot_path = screenshots_dir / f"face_{account_id}_{timestamp}.png"
+        try:
+            await self.page.screenshot(path=str(screenshot_path), full_page=True)
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to capture face checkpoint screenshot for %s: %s",
+                self.account.login,
+                exc,
+            )
+            screenshot_path = screenshots_dir / f"face_{account_id}_{timestamp}_failed.png"
+
+        message = (
+            "Face/ID checkpoint detected. Manual verification required. "
+            f"Screenshot saved to {screenshot_path}."
+        )
+        await self._log(message)
+        raise AccountCheckpointError(
+            message,
+            checkpoint_type=CheckpointType.FACE_VERIFICATION,
+            screenshot_path=str(screenshot_path),
+        )
+
+    async def _legacy_manual_wait(self) -> bool:
+        """Legacy checkpoint fallback that waits for manual operator confirmation."""
         keep_open = self._parse_bool(
             os.getenv("FB_KEEP_BROWSER_ON_CHECKPOINT"), default=True
         )
@@ -926,27 +1516,8 @@ class FacebookBrowser:
         attempts = max(1, wait_seconds // poll_seconds)
 
         await self._log(
-            f"CHECKPOINT: автоматическое прохождение не удалось. Браузер оставлен открытым на {wait_seconds} сек для ручного ввода кода."
-        )
-        for _ in range(attempts):
-            await asyncio.sleep(poll_seconds)
-            current_url = self.page.url or ""
-            if self.CHECKPOINT_URL_RE.search(current_url):
-                continue
-            if await self._has_c_user_cookie():
-                return True
-
-        await self._log(
-            "CHECKPOINT: время ожидания вышло, аккаунт будет помечен как CHECKPOINT."
-        )
-        return False
-
-        wait_seconds = int(os.getenv("FB_CHECKPOINT_WAIT_SECONDS", "600"))
-        poll_seconds = max(1, int(os.getenv("FB_CHECKPOINT_POLL_SECONDS", "5")))
-        attempts = max(1, wait_seconds // poll_seconds)
-
-        await self._log(
-            f"CHECKPOINT: браузер оставлен открытым на {wait_seconds} сек для ручного ввода кода."
+            "CHECKPOINT: автоматическое прохождение не удалось. "
+            f"Браузер оставлен открытым на {wait_seconds} сек для ручного ввода кода."
         )
         for _ in range(attempts):
             await asyncio.sleep(poll_seconds)

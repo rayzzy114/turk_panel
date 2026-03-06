@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 from datetime import timedelta
 import pytest
 import httpx
@@ -19,9 +20,9 @@ from models import (
     TaskStatus,
     TaskActionType,
 )
+from worker import AccountCaptchaError, AccountInvalidCredentialsError
 import api as api_module
 import importlib
-from pathlib import Path
 
 
 import pytest_asyncio
@@ -44,6 +45,58 @@ async def setup_db(tmp_path, monkeypatch):
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     yield session_factory
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ensure_tables_runs_migrations_once_for_concurrent_calls(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'ensure_once.db'}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+
+    importlib.reload(api_module)
+    migration_calls = 0
+
+    def fake_migrate(_: object) -> None:
+        nonlocal migration_calls
+        migration_calls += 1
+
+    monkeypatch.setattr(api_module, "_migrate_schema_if_needed", fake_migrate)
+
+    await asyncio.gather(api_module._ensure_tables(), api_module._ensure_tables())
+    await api_module._ensure_tables()
+
+    assert migration_calls == 1
+
+    await api_module.engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ensure_tables_skips_migrations_when_schema_is_current(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'ensure_current.db'}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+
+    engine = create_async_engine(database_url)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    await engine.dispose()
+
+    importlib.reload(api_module)
+    migration_calls = 0
+
+    def fake_migrate(_: object) -> None:
+        nonlocal migration_calls
+        migration_calls += 1
+
+    monkeypatch.setattr(api_module, "_migrate_schema_if_needed", fake_migrate)
+
+    await api_module._ensure_tables()
+
+    assert migration_calls == 0
+
+    await api_module.engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -380,6 +433,30 @@ async def test_block_account_marks_checkpoint_status_for_checkpoint_reason(setup
         await session.refresh(acc)
 
         assert acc.status == AccountStatus.CHECKPOINT
+
+
+@pytest.mark.asyncio
+async def test_mark_account_invalid_credentials_sets_special_status(setup_db):
+    async_session = setup_db
+    async with async_session() as session:
+        acc = Account(
+            login="bad_creds_user",
+            password="p",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add(acc)
+        await session.commit()
+
+        await api_module._mark_account_invalid_credentials(
+            session,
+            acc,
+            reason="wrong password",
+        )
+        await session.refresh(acc)
+
+        assert acc.status == AccountStatus.INVALID_CREDENTIALS
+        assert acc.last_checkpoint_type is None
 
 
 @pytest.mark.asyncio
@@ -1046,7 +1123,9 @@ async def test_process_browser_task_unassigns_non_active_preset_account(
 
 
 @pytest.mark.asyncio
-async def test_warmup_account_endpoint_updates_warmed_up_at(setup_db, monkeypatch):
+async def test_warmup_account_endpoint_queues_task_and_processing_persists_logs(
+    setup_db, monkeypatch
+):
     async_session = setup_db
     async with async_session() as session:
         acc = Account(
@@ -1061,25 +1140,46 @@ async def test_warmup_account_endpoint_updates_warmed_up_at(setup_db, monkeypatc
         acc_id = acc.id
 
     class StubBrowser:
-        def __init__(self, account) -> None:
+        def __init__(
+            self,
+            account,
+            headless: bool = True,
+            strict_cookie_session: bool = True,
+            log_callback=None,
+        ) -> None:
             self.account = account
-            self.started = False
+            self.log_callback = log_callback
 
-        async def start(self) -> None:
-            self.started = True
+        async def __aenter__(self):
+            return self
 
-        async def login(self) -> None:
+        async def __aexit__(self, exc_type, exc, tb) -> None:
             return None
 
-        async def warmup(self, duration_seconds: int = 360) -> bool:
+        async def login(self) -> None:
+            if self.log_callback is not None:
+                await self.log_callback("Авторизация успешна для прогрева.")
+            return None
+
+        async def warmup(self, duration_seconds: int = 360) -> dict[str, object]:
             assert 300 <= duration_seconds <= 600
-            return True
+            if self.log_callback is not None:
+                await self.log_callback("Прогрев: старт действия Лента.")
+                await self.log_callback("Прогрев: Лента успешно завершено за 100 мс.")
+            return {
+                "result": "completed",
+                "actions_attempted": 1,
+                "actions_succeeded": 1,
+                "actions_failed": 0,
+                "action_log": [
+                    {"action": "_warmup_scroll_feed", "status": "ok", "duration_ms": 100}
+                ],
+                "error_message": None,
+                "duration_seconds": 12,
+            }
 
         async def get_storage_state(self):
             return {"cookies": [{"name": "c_user", "value": "1"}]}
-
-        async def stop(self) -> None:
-            self.started = False
 
     monkeypatch.setattr(api_module, "FacebookBrowser", StubBrowser)
 
@@ -1095,8 +1195,8 @@ async def test_warmup_account_endpoint_updates_warmed_up_at(setup_db, monkeypatc
         )
         assert resp.status_code == 200
         payload = resp.json()
-        assert payload["status"] == "done"
-        assert payload["warmed_up_at"] is not None
+        assert payload["status"] == "queued"
+        task_id = payload["task_id"]
 
         alias_resp = await client.post(
             f"/accounts/{acc_id}/warmup",
@@ -1104,11 +1204,96 @@ async def test_warmup_account_endpoint_updates_warmed_up_at(setup_db, monkeypatc
         )
         assert alias_resp.status_code == 200
         alias_payload = alias_resp.json()
-        assert alias_payload["status"] in {"done", "skipped"}
+        assert alias_payload["status"] == "queued"
 
+        tasks_resp = await client.get("/api/tasks", headers=_auth_headers())
+        assert tasks_resp.status_code == 200
+        queued_task = next(item for item in tasks_resp.json() if item["id"] == task_id)
+        assert queued_task["action_type"] == TaskActionType.WARMUP.value
+        assert queued_task["status"] == TaskStatus.PENDING.value
+        assert any("поставлен в очередь" in log["message"].lower() for log in queued_task["logs"])
+
+    async with async_session() as session:
+        task_obj = await session.get(Task, task_id)
+        assert task_obj is not None
+
+        finished = await api_module._process_browser_task(session, task_obj)
+        await session.refresh(task_obj)
+        account = await session.get(Account, acc_id)
+        assert account is not None
+        await session.refresh(account)
+
+        task_logs = (
+            await session.scalars(select(Log).where(Log.task_id == task_id))
+        ).all()
+        messages = [row.message for row in task_logs]
+
+        assert finished is True
+        assert task_obj.status == TaskStatus.SUCCESS
+        assert any("Прогрев" in msg for msg in messages)
+        assert any("Лента" in msg for msg in messages)
+
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
         accounts_resp = await client.get("/api/accounts", headers=_auth_headers())
         row = next(item for item in accounts_resp.json() if item["id"] == acc_id)
         assert row["warmed_up_at"] is not None
+
+        logs_resp = await client.get(
+            f"/api/accounts/{acc_id}/warmup/logs?limit=5",
+            headers=_auth_headers(),
+        )
+        assert logs_resp.status_code == 200
+        logs_payload = logs_resp.json()
+        assert len(logs_payload) >= 1
+        latest = logs_payload[0]
+        assert latest["result"] == "completed"
+        assert latest["actions_attempted"] == 1
+        assert latest["actions_succeeded"] == 1
+        assert latest["actions_failed"] == 0
+        assert latest["action_log"][0]["action"] == "_warmup_scroll_feed"
+
+
+@pytest.mark.asyncio
+async def test_bulk_warmup_endpoint_creates_visible_warmup_tasks(setup_db):
+    async_session = setup_db
+    async with async_session() as session:
+        acc = Account(
+            login="bulk_warmup_visible",
+            password="p",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add(acc)
+        await session.commit()
+        await session.refresh(acc)
+        acc_id = acc.id
+
+    importlib.reload(api_module)
+    transport = httpx.ASGITransport(app=api_module.app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        resp = await client.post(
+            "/api/accounts/bulk_warmup",
+            json={"ids": [acc_id]},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["queued"] == 1
+
+        tasks_resp = await client.get("/api/tasks", headers=_auth_headers())
+        assert tasks_resp.status_code == 200
+        tasks = tasks_resp.json()
+        warmup_task = next((item for item in tasks if item["account_id"] == acc_id), None)
+        assert warmup_task is not None
+        assert warmup_task["action_type"] == TaskActionType.WARMUP.value
+        assert warmup_task["status"] in {
+            TaskStatus.PENDING.value,
+            TaskStatus.IN_PROGRESS.value,
+        }
 
 
 @pytest.mark.asyncio
@@ -1202,6 +1387,234 @@ async def test_warmup_account_endpoint_skips_when_recently_warmed(
         payload = resp.json()
         assert payload["status"] == "skipped"
         assert "Already warmed up" in payload["reason"]
+
+
+@pytest.mark.asyncio
+async def test_warmup_account_endpoint_reuses_existing_inflight_task(setup_db):
+    async_session = setup_db
+    async with async_session() as session:
+        acc = Account(
+            login="warmup_dedupe",
+            password="p",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add(acc)
+        await session.commit()
+        await session.refresh(acc)
+
+        task = Task(
+            account_id=acc.id,
+            action_type=TaskActionType.WARMUP,
+            target_url="https://www.facebook.com/",
+            payload_text=None,
+            status=TaskStatus.PENDING,
+            target_gender="ANY",
+        )
+        session.add(task)
+        await session.commit()
+        await session.refresh(task)
+        task_id = task.id
+
+    importlib.reload(api_module)
+    transport = httpx.ASGITransport(app=api_module.app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        resp = await client.post(
+            f"/api/accounts/{acc.id}/warmup",
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["status"] == "queued"
+        assert payload["task_id"] == task_id
+
+    async with async_session() as session:
+        tasks = (
+            await session.scalars(
+                select(Task).where(
+                    Task.account_id == acc.id,
+                    Task.action_type == TaskActionType.WARMUP,
+                )
+            )
+        ).all()
+        assert len(tasks) == 1
+
+
+@pytest.mark.asyncio
+async def test_process_browser_task_requeues_warmup_when_assigned_account_missing(
+    setup_db,
+):
+    async_session = setup_db
+    async with async_session() as session:
+        task = Task(
+            account_id=999999,
+            action_type=TaskActionType.WARMUP,
+            target_url="https://www.facebook.com/",
+            payload_text=None,
+            status=TaskStatus.IN_PROGRESS,
+            target_gender="ANY",
+        )
+        session.add(task)
+        await session.commit()
+        await session.refresh(task)
+
+        finished = await api_module._process_browser_task(session, task)
+        await session.refresh(task)
+
+        assert finished is False
+        assert task.status == TaskStatus.PENDING
+        assert task.account_id is None
+
+
+@pytest.mark.asyncio
+async def test_warmup_account_persists_error_log_on_failure(setup_db, monkeypatch):
+    async_session = setup_db
+    async with async_session() as session:
+        acc = Account(
+            login="warmup_fails",
+            password="p",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add(acc)
+        await session.commit()
+        await session.refresh(acc)
+        acc_id = acc.id
+
+    class FailingBrowser:
+        def __init__(
+            self,
+            account,
+            headless: bool = True,
+            strict_cookie_session: bool = True,
+            log_callback=None,
+        ) -> None:
+            self.account = account
+            self.log_callback = log_callback
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def login(self) -> None:
+            raise AccountCaptchaError("login exploded")
+
+    monkeypatch.setattr(api_module, "FacebookBrowser", FailingBrowser)
+    importlib.reload(api_module)
+    monkeypatch.setattr(api_module, "FacebookBrowser", FailingBrowser)
+    transport = httpx.ASGITransport(app=api_module.app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        warmup_resp = await client.post(
+            f"/api/accounts/{acc_id}/warmup",
+            headers=_auth_headers(),
+        )
+        assert warmup_resp.status_code == 200
+        payload = warmup_resp.json()
+        assert payload["status"] == "queued"
+        task_id = payload["task_id"]
+
+    async with async_session() as session:
+        task = await session.get(Task, task_id)
+        assert task is not None
+        finished = await api_module._process_browser_task(session, task)
+        await session.refresh(task)
+        assert finished is True
+        assert task.status == TaskStatus.ERROR
+        task_logs = (
+            await session.scalars(select(Log).where(Log.task_id == task_id))
+        ).all()
+        messages = [row.message for row in task_logs]
+        assert any("Не удалось прогреть аккаунт" in message for message in messages)
+        assert all("Ищу замену" not in message for message in messages)
+
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        logs_resp = await client.get(
+            f"/api/accounts/{acc_id}/warmup/logs?limit=5",
+            headers=_auth_headers(),
+        )
+        assert logs_resp.status_code == 200
+        logs_payload = logs_resp.json()
+        assert len(logs_payload) >= 1
+        assert logs_payload[0]["result"] == "error"
+        assert "login exploded" in (logs_payload[0]["error_message"] or "")
+
+
+@pytest.mark.asyncio
+async def test_warmup_invalid_credentials_marks_account_special_status(
+    setup_db, monkeypatch
+):
+    async_session = setup_db
+    async with async_session() as session:
+        acc = Account(
+            login="warmup_invalid_creds",
+            password="p",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add(acc)
+        await session.commit()
+        await session.refresh(acc)
+        acc_id = acc.id
+
+    class InvalidCredsBrowser:
+        def __init__(
+            self,
+            account,
+            headless: bool = True,
+            strict_cookie_session: bool = True,
+            log_callback=None,
+        ) -> None:
+            self.account = account
+            self.log_callback = log_callback
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def login(self) -> None:
+            raise AccountInvalidCredentialsError("wrong password")
+
+    monkeypatch.setattr(api_module, "FacebookBrowser", InvalidCredsBrowser)
+    importlib.reload(api_module)
+    monkeypatch.setattr(api_module, "FacebookBrowser", InvalidCredsBrowser)
+    transport = httpx.ASGITransport(app=api_module.app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        warmup_resp = await client.post(
+            f"/api/accounts/{acc_id}/warmup",
+            headers=_auth_headers(),
+        )
+        assert warmup_resp.status_code == 200
+        task_id = warmup_resp.json()["task_id"]
+
+    async with async_session() as session:
+        task = await session.get(Task, task_id)
+        assert task is not None
+        finished = await api_module._process_browser_task(session, task)
+        await session.refresh(task)
+        account = await session.get(Account, acc_id)
+        assert account is not None
+        await session.refresh(account)
+        task_logs = (
+            await session.scalars(select(Log).where(Log.task_id == task_id))
+        ).all()
+        messages = [row.message for row in task_logs]
+
+        assert finished is True
+        assert task.status == TaskStatus.ERROR
+        assert account.status == AccountStatus.INVALID_CREDENTIALS
+        assert any("Facebook отклонил логин или пароль" in message for message in messages)
 
 
 @pytest.mark.asyncio

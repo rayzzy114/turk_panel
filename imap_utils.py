@@ -49,6 +49,14 @@ def _decode_header_value(header_val) -> str:
     return result
 
 
+def _decode_payload_text(payload: object) -> str:
+    if isinstance(payload, bytes):
+        return payload.decode(errors="ignore")
+    if isinstance(payload, str):
+        return payload
+    return ""
+
+
 async def get_facebook_code(
     email_login: str,
     email_password: str,
@@ -137,15 +145,15 @@ def _check_inbox_sync(
                     if msg.is_multipart():
                         for part in msg.walk():
                             if part.get_content_type() in ["text/plain", "text/html"]:
-                                body = part.get_payload(decode=True).decode(
-                                    errors="ignore"
-                                )
+                                payload = part.get_payload(decode=True)
+                                body = _decode_payload_text(payload)
                                 code_match = re.search(r"\b(\d{6,8})\b", body)
                                 if code_match:
                                     mail.logout()
                                     return code_match.group(1)
                     else:
-                        body = msg.get_payload(decode=True).decode(errors="ignore")
+                        payload = msg.get_payload(decode=True)
+                        body = _decode_payload_text(payload)
                         code_match = re.search(r"\b(\d{6,8})\b", body)
                         if code_match:
                             mail.logout()

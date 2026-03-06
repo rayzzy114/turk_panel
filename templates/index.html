@@ -6,26 +6,420 @@
     <title>TURKISH PANEL</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Rubik:wght@500;600;700&display=swap&subset=cyrillic" rel="stylesheet">
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+    />
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-      * {
-        font-family: 'JetBrains Mono', monospace !important;
+      :root {
+        --panel-font-body: 'IBM Plex Sans', sans-serif;
+        --panel-font-display: 'Rubik', sans-serif;
+        --dashboard-row-height: 76px;
+        --dashboard-head-height: 56px;
+        --surface-0: rgba(10, 10, 12, 0.72);
+        --surface-1: rgba(20, 20, 24, 0.56);
+        --surface-2: rgba(255, 255, 255, 0.04);
+        --surface-border: rgba(255, 255, 255, 0.075);
+        --surface-border-strong: rgba(255, 255, 255, 0.11);
+        --surface-hover: rgba(255, 255, 255, 0.03);
+        --text-soft: rgba(228, 228, 231, 0.9);
+        --text-muted: rgba(161, 161, 170, 0.84);
+      }
+
+      body,
+      button,
+      input,
+      select,
+      textarea {
+        font-family: var(--panel-font-body) !important;
+      }
+
+      h1,
+      h2,
+      h3,
+      th,
+      .font-display {
+        font-family: var(--panel-font-display) !important;
+      }
+
+      body {
+        background:
+          radial-gradient(circle at top left, rgba(255, 255, 255, 0.03), transparent 19%),
+          radial-gradient(circle at 85% 15%, rgba(255, 255, 255, 0.02), transparent 18%),
+          linear-gradient(180deg, #060607 0%, #0a0b0d 48%, #040405 100%);
+      }
+
+      .panel-card {
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(255, 255, 255, 0.015) 100%),
+          linear-gradient(180deg, rgba(16, 16, 18, 0.62) 0%, rgba(8, 8, 10, 0.76) 100%);
+        border: 1px solid var(--surface-border);
+        backdrop-filter: blur(20px) saturate(120%);
+        -webkit-backdrop-filter: blur(20px) saturate(120%);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.05),
+          0 20px 44px rgba(0, 0, 0, 0.2);
+      }
+
+      .section-title {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .section-title i {
+        color: rgba(244, 244, 245, 0.82);
+      }
+
+      .icon-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 36px;
+        min-height: 36px;
+        border-radius: 0.5rem;
+        border: 1px solid transparent;
+        transition:
+          background-color 180ms ease,
+          border-color 180ms ease,
+          color 180ms ease,
+          box-shadow 180ms ease,
+          transform 120ms ease;
+      }
+
+      .icon-btn:hover {
+        background: rgba(255, 255, 255, 0.03);
+        border-color: rgba(255, 255, 255, 0.08);
+      }
+
+      .icon-btn:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.12);
+      }
+
+      .modal-close {
+        color: #a1a1aa;
+      }
+
+      .modal-close:hover {
+        color: #f4f4f5;
+      }
+
+      .account-login-cell {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.45rem;
+        min-width: 0;
+        overflow: hidden;
+      }
+
+      .account-login-text {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        line-height: 1.15;
+        font-size: 0.9rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        color: rgba(244, 244, 245, 0.94);
+      }
+
+      .account-login-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        flex-shrink: 0;
+        flex-wrap: wrap;
+      }
+
+      .account-proxy-cell {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        align-items: stretch;
+        min-width: 0;
+      }
+
+      .account-proxy-meta {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 0.375rem;
+        flex-wrap: wrap;
+      }
+
+      .account-status-wrap {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        min-width: 0;
+      }
+
+      .toolbar-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.5rem;
+      }
+
+      .toolbar-row > * {
+        min-width: 0;
+      }
+
+      .toolbar-row .btn-ui {
+        width: 100%;
+      }
+
+      .btn-ui {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 38px;
+        padding: 0.6rem 0.8rem;
+        border-radius: 0.6rem;
+        border: 1px solid transparent;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        transition:
+          background-color 180ms ease,
+          border-color 180ms ease,
+          color 180ms ease,
+          transform 120ms ease,
+          box-shadow 180ms ease;
+      }
+
+      .btn-ui:hover {
+        transform: translateY(-1px);
+      }
+
+      .btn-ui:active {
+        transform: scale(0.98);
+      }
+
+      .btn-ui:focus-visible {
+        outline: none;
+      }
+
+      .btn-ui:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .btn-neutral {
+        background: rgba(255, 255, 255, 0.025);
+        border-color: rgba(255, 255, 255, 0.09);
+        color: #e5e7eb;
+      }
+
+      .btn-neutral:hover {
+        background: rgba(255, 255, 255, 0.045);
+      }
+
+      .btn-neutral:focus-visible {
+        box-shadow: 0 0 0 2px rgba(113, 113, 122, 0.28);
+      }
+
+      .btn-primary {
+        background: linear-gradient(180deg, rgba(24, 24, 27, 0.92) 0%, rgba(15, 15, 18, 0.96) 100%);
+        border-color: rgba(255, 255, 255, 0.12);
+        color: #f8fafc;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+      }
+
+      .btn-primary:hover {
+        background: linear-gradient(180deg, rgba(39, 39, 42, 0.98) 0%, rgba(18, 18, 20, 0.98) 100%);
+      }
+
+      .btn-primary:focus-visible {
+        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.16);
+      }
+
+      .btn-subtle {
+        background: rgba(255, 255, 255, 0.015);
+        border-color: rgba(255, 255, 255, 0.07);
+        color: #d4d4d8;
+      }
+
+      .btn-subtle:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .btn-subtle:focus-visible {
+        box-shadow: 0 0 0 2px rgba(100, 116, 139, 0.25);
+      }
+
+      .btn-positive {
+        background: rgba(16, 185, 129, 0.07);
+        border-color: rgba(16, 185, 129, 0.18);
+        color: #d1fae5;
+      }
+
+      .btn-positive:hover {
+        background: rgba(16, 185, 129, 0.11);
+      }
+
+      .btn-positive:focus-visible {
+        box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.22);
+      }
+
+      .btn-warn {
+        background: rgba(245, 158, 11, 0.06);
+        border-color: rgba(245, 158, 11, 0.18);
+        color: #fde68a;
+      }
+
+      .btn-warn:hover {
+        background: rgba(245, 158, 11, 0.1);
+      }
+
+      .btn-warn:focus-visible {
+        box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.22);
+      }
+
+      .btn-danger {
+        background: rgba(239, 68, 68, 0.05);
+        border-color: rgba(239, 68, 68, 0.16);
+        color: #fecaca;
+      }
+
+      .btn-danger:hover {
+        background: rgba(239, 68, 68, 0.09);
+      }
+
+      .btn-danger:focus-visible {
+        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+      }
+
+      .action-icon-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        background: rgba(255, 255, 255, 0.012);
+        color: rgba(228, 228, 231, 0.74);
+        transition:
+          background-color 180ms ease,
+          border-color 180ms ease,
+          color 180ms ease,
+          transform 120ms ease;
+      }
+
+      .action-icon-btn:hover {
+        background: rgba(255, 255, 255, 0.045);
+        border-color: rgba(255, 255, 255, 0.12);
+        color: rgba(250, 250, 250, 0.92);
+      }
+
+      .action-icon-btn:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
+      }
+
+      .action-icon-btn:active {
+        transform: scale(0.97);
+      }
+
+      .meta-icon {
+        color: rgba(212, 212, 216, 0.72);
+      }
+
+      .table-shell {
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 1rem;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, rgba(255, 255, 255, 0.005) 100%),
+          rgba(8, 8, 10, 0.42);
+      }
+
+      .table-scroll-area {
+        max-height: calc(var(--dashboard-head-height) + (var(--dashboard-row-height) * 5));
+        overflow-y: auto;
+        overflow-x: hidden;
+        scrollbar-gutter: stable;
+      }
+
+      .panel-split-card {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+
+      .table-head-surface {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        background:
+          linear-gradient(180deg, rgba(7, 7, 9, 0.96) 0%, rgba(12, 12, 15, 0.94) 100%);
+        backdrop-filter: blur(20px) saturate(145%);
+        -webkit-backdrop-filter: blur(20px) saturate(145%);
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05);
+      }
+
+      .modal-backdrop {
+        background: rgba(4, 4, 5, 0.78);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+      }
+
+      .modal-panel {
+        width: 100%;
+        overflow: hidden;
+        border-radius: 1.25rem;
+      }
+
+      .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      .modal-body {
+        padding-top: 1rem;
+      }
+
+      .modal-footer {
+        display: flex;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        padding-top: 1rem;
+        margin-top: 1rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      .modal-note {
+        font-size: 0.8125rem;
+        line-height: 1.45;
+        color: rgba(161, 161, 170, 0.88);
       }
 
       .selection-check {
         appearance: none;
         -webkit-appearance: none;
-        width: 22px;
-        height: 22px;
-        min-width: 22px;
-        min-height: 22px;
-        border: 1px solid #3f3f46;
-        border-radius: 6px;
-        background: linear-gradient(180deg, #131827 0%, #09090b 100%);
-        box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.04),
-          0 2px 4px rgba(0, 0, 0, 0.35);
+        width: 16px;
+        height: 16px;
+        min-width: 16px;
+        min-height: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.02);
         display: inline-grid;
         place-content: center;
         cursor: pointer;
@@ -34,11 +428,8 @@
       }
 
       .selection-check:hover {
-        border-color: rgba(16, 185, 129, 0.85);
-        box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.05),
-          0 0 0 2px rgba(16, 185, 129, 0.12),
-          0 6px 14px rgba(0, 0, 0, 0.45);
+        border-color: rgba(255, 255, 255, 0.22);
+        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.04);
       }
 
       .selection-check:active {
@@ -46,57 +437,162 @@
       }
 
       .selection-check:checked {
-        border-color: rgba(16, 185, 129, 0.95);
-        background: linear-gradient(180deg, #34d399 0%, #10b981 100%);
-        box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.16),
-          0 0 0 2px rgba(16, 185, 129, 0.18),
-          0 8px 18px rgba(16, 185, 129, 0.22);
+        border-color: rgba(255, 255, 255, 0.32);
+        background: rgba(255, 255, 255, 0.06);
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05);
       }
 
       .selection-check:checked::after {
         content: "";
-        width: 5px;
-        height: 9px;
-        border: solid rgba(4, 16, 11, 0.95);
+        width: 4px;
+        height: 7px;
+        border: solid rgba(250, 250, 250, 0.94);
         border-width: 0 2px 2px 0;
         transform: translateY(-1px) rotate(45deg);
       }
 
       .selection-check:indeterminate {
-        border-color: rgba(16, 185, 129, 0.95);
-        background: linear-gradient(180deg, #34d399 0%, #10b981 100%);
+        border-color: rgba(255, 255, 255, 0.32);
+        background: rgba(255, 255, 255, 0.06);
       }
 
       .selection-check:indeterminate::after {
         content: "";
-        width: 9px;
+        width: 8px;
         height: 2px;
         border-radius: 999px;
-        background: rgba(4, 16, 11, 0.95);
+        background: rgba(250, 250, 250, 0.92);
       }
 
       .selection-check:focus-visible {
         outline: none;
-        box-shadow:
-          0 0 0 3px rgba(16, 185, 129, 0.28),
-          inset 0 1px 0 rgba(255, 255, 255, 0.07);
+        box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
       }
 
       .touch-target {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 36px;
-        height: 36px;
+        width: 44px;
+        height: 44px;
       }
 
       .touch-target-sm {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 30px;
-        height: 30px;
+        width: 32px;
+        height: 32px;
+      }
+
+      .accounts-table {
+        width: 100%;
+        table-layout: fixed;
+      }
+
+      .accounts-table th,
+      .accounts-table td {
+        vertical-align: middle;
+        border-top: 1px solid rgba(255, 255, 255, 0.055);
+      }
+
+      .accounts-table .col-check {
+        width: 44px;
+      }
+
+      .accounts-table .col-id {
+        width: 48px;
+      }
+
+      .accounts-table .col-login {
+        width: 30%;
+      }
+
+      .accounts-table .col-proxy {
+        width: 42%;
+      }
+
+      .accounts-table .col-status {
+        width: 18%;
+      }
+
+      .account-status-badge {
+        max-width: 100%;
+        white-space: nowrap;
+      }
+
+      .accounts-table select {
+        height: 34px;
+        font-size: 10px;
+        line-height: 1.1;
+      }
+
+      .table-head-row th {
+        color: rgba(228, 228, 231, 0.84);
+        font-size: 0.72rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        height: var(--dashboard-head-height);
+      }
+
+      .table-body-row {
+        background: transparent;
+        transition: background-color 180ms ease;
+      }
+
+      .table-body-row:hover {
+        background: rgba(255, 255, 255, 0.022);
+      }
+
+      .dashboard-table-row > td {
+        height: var(--dashboard-row-height);
+      }
+
+      .task-url-link {
+        display: inline-block;
+        max-width: 190px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: top;
+      }
+
+      .mobile-account-inline {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.45rem;
+      }
+
+      .mobile-account-proxy {
+        width: 100%;
+      }
+
+      input:not(.selection-check),
+      select,
+      textarea {
+        background: rgba(255, 255, 255, 0.025) !important;
+        border-color: rgba(255, 255, 255, 0.08) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        color: rgba(244, 244, 245, 0.94) !important;
+      }
+
+      select option,
+      select optgroup {
+        background: #111216 !important;
+        color: #f4f4f5 !important;
+      }
+
+      input:not(.selection-check):focus,
+      select:focus,
+      textarea:focus {
+        border-color: rgba(16, 185, 129, 0.38) !important;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.05),
+          0 0 0 3px rgba(16, 185, 129, 0.10),
+          0 10px 20px rgba(0, 0, 0, 0.16) !important;
       }
 
       @media (prefers-reduced-motion: reduce) {
@@ -111,33 +607,72 @@
           animation: none !important;
         }
       }
+
+      @media (min-width: 768px) {
+        .toolbar-row {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+        }
+
+        .toolbar-row .btn-ui {
+          width: auto;
+        }
+      }
+
+      @media (max-width: 479px) {
+        .toolbar-row {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .account-login-text {
+          font-size: 0.9rem;
+        }
+      }
+
+      @media (max-width: 767px) {
+        .panel-card {
+          border-radius: 1rem;
+        }
+
+        .accounts-table .col-check {
+          width: 42px;
+        }
+
+        .accounts-table .col-login {
+          width: auto;
+        }
+
+        .account-login-text {
+          font-size: 0.98rem;
+        }
+      }
     </style>
   </head>
-  <body class="bg-zinc-950 text-zinc-100 min-h-screen">
+  <body class="text-zinc-100 min-h-screen">
     <div class="max-w-7xl mx-auto px-4 py-8">
       <header class="flex flex-wrap items-center justify-between gap-4 mb-8">
         <div class="flex items-center gap-3">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            class="h-9 w-9 text-emerald-400 drop-shadow-md"
-            aria-hidden="true"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M3 4.5h12.5L14 8l1.5 3.5H3V4.5Zm0 7v8M3 8h12.5" />
-          </svg>
-          <h1 class="text-3xl font-black tracking-tight uppercase italic text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-sky-500">TURKISH PANEL</h1>
+          <div class="h-11 w-11 rounded-xl border border-emerald-900/60 bg-emerald-950/40 text-emerald-300 flex items-center justify-center shadow-lg shadow-emerald-950/20">
+            <i class="fas fa-terminal text-lg" aria-hidden="true"></i>
+          </div>
+          <div>
+            <h1 class="text-3xl font-black tracking-tight uppercase text-transparent bg-clip-text bg-gradient-to-r from-emerald-300 via-emerald-400 to-sky-400">TURKISH PANEL</h1>
+            <p class="text-sm text-zinc-400 tracking-wide">Operator console for Facebook accounts, warmup and proxy control</p>
+          </div>
         </div>
-        <div class="bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 shadow-lg shadow-emerald-900/10">
-          Баланс MoreThanPanel:
-          <span id="balance" class="font-bold text-emerald-400">загрузка...</span>
+        <div class="panel-card rounded-xl px-4 py-3 min-w-[240px]">
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-xs uppercase tracking-[0.18em] text-zinc-400">MoreThanPanel balance</span>
+            <i class="fas fa-wallet text-emerald-400" aria-hidden="true"></i>
+          </div>
+          <div id="balance" class="mt-1 text-2xl font-bold text-emerald-400 leading-none">загрузка...</div>
         </div>
       </header>
 
 
-      <section class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 mb-8 shadow-lg shadow-black/50">
-        <h2 class="text-lg font-semibold mb-4 text-zinc-100">Создать задачу</h2>
+      <section class="panel-card rounded-xl p-4 mb-8">
+        <h2 class="section-title text-lg font-semibold mb-4 text-zinc-100"><i class="fas fa-bolt" aria-hidden="true"></i><span>Создать задачу</span></h2>
         <form id="taskForm" class="grid md:grid-cols-2 gap-4">
           <label class="block">
             <span class="text-sm text-zinc-300 font-medium">URL</span>
@@ -183,15 +718,15 @@
             </select>
           </label>
           <div class="flex items-end">
-            <button class="bg-emerald-600 hover:bg-emerald-500 text-white rounded px-5 py-2.5 font-bold shadow-lg shadow-emerald-900/20 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 active:scale-[0.98] transition-all w-full md:w-auto" type="submit">
+            <button class="btn-ui btn-primary w-full md:w-auto" type="submit">
               Создать
             </button>
           </div>
         </form>
       </section>
 
-      <section class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 mb-8 shadow-lg shadow-black/50">
-        <h2 class="text-lg font-semibold mb-4 text-zinc-100">Парсер комментариев</h2>
+      <section class="panel-card rounded-xl p-4 mb-8">
+        <h2 class="section-title text-lg font-semibold mb-4 text-zinc-100"><i class="fas fa-comments" aria-hidden="true"></i><span>Парсер комментариев</span></h2>
         <form id="parserForm" class="flex flex-col md:flex-row gap-3 mb-4">
           <input
             id="parserPostUrl"
@@ -213,23 +748,20 @@
           </div>
           <button
             id="parseCommentsBtn"
-            class="bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-60 disabled:cursor-not-allowed rounded px-5 py-2.5 font-bold shadow-lg shadow-sky-900/20 focus:outline-none focus:ring-2 focus:ring-sky-500/50 active:scale-[0.98] transition-all"
+            class="btn-ui btn-subtle disabled:opacity-60 disabled:cursor-not-allowed"
             type="submit"
           >
             Спарсить
           </button>
         </form>
         <div id="parserLoader" class="hidden mb-4 flex items-center gap-3 text-sm text-sky-400 font-medium">
-          <svg class="animate-spin h-5 w-5 text-sky-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
+          <i class="fas fa-spinner fa-spin text-base text-sky-500" aria-hidden="true"></i>
           Загрузка комментариев через Apify (30-90 сек)...
         </div>
-        <div class="overflow-auto max-h-[500px] border border-zinc-800 rounded-lg">
+        <div class="table-shell overflow-auto max-h-[500px]">
           <table class="w-full text-sm">
-            <thead class="text-zinc-400 bg-zinc-950/50">
-              <tr>
+            <thead class="bg-black/30 backdrop-blur-sm">
+              <tr class="table-head-row">
                 <th class="text-left py-3 pl-4 font-semibold">Автор / Дата</th>
                 <th class="text-left py-3 font-semibold">Текст</th>
                 <th class="text-left py-3 font-semibold">Лайки</th>
@@ -237,7 +769,7 @@
               </tr>
             </thead>
             <tbody id="commentsTable">
-              <tr class="border-t border-zinc-800">
+              <tr class="table-body-row">
                 <td class="py-4 pl-4 text-zinc-500 italic" colspan="4">Результаты парсинга появятся здесь</td>
               </tr>
             </tbody>
@@ -246,51 +778,49 @@
         <div id="parserWarning" class="mt-3 text-sm font-medium text-amber-400"></div>
         <div class="mt-4">
           <div class="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-2">Debug лог парсера</div>
-          <pre id="parserDebugLog" class="bg-zinc-950 border border-zinc-800 rounded-lg p-4 text-xs text-zinc-400 whitespace-pre-wrap shadow-inner">Ожидание запуска...</pre>
+          <pre id="parserDebugLog" class="bg-white/[0.03] border border-white/6 rounded-xl p-4 text-xs text-zinc-400 whitespace-pre-wrap shadow-inner">Ожидание запуска...</pre>
         </div>
       </section>
 
       <section class="grid lg:grid-cols-2 gap-6 mb-8">
-        <div id="accountsDropZone" class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 shadow-lg shadow-black/50 relative transition-colors">
+        <div id="accountsDropZone" class="panel-card panel-split-card rounded-xl p-4 relative transition-colors">
           <input type="file" id="accountFileInput" multiple accept=".txt" class="hidden" />
-          <h2 class="text-lg font-semibold mb-4 text-zinc-100">
-            <div class="flex items-center gap-2 mb-3">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-              <span class="font-bold tracking-wide">Аккаунты</span>
-              <span id="selectedAccountsBadge" class="inline-flex items-center h-5 px-2 text-xs bg-zinc-800 text-zinc-200 rounded-full border border-zinc-700">Выбрано: 0</span>
-            </div>
-            <div class="w-full pb-1">
-              <div class="flex flex-wrap items-center gap-2 pr-1">
-                <button id="bulkCheckLoginBtn" onclick="bulkCheckLoginAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-sky-950/60 hover:bg-sky-900 text-sky-300 rounded-md border border-sky-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Проверить вход</button>
-                <button id="bulkShadowBanBtn" onclick="bulkShadowBanAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-cyan-950/60 hover:bg-cyan-900 text-cyan-300 rounded-md border border-cyan-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Теневой 72ч</button>
-                <button id="bulkShadowUnbanBtn" onclick="bulkShadowUnbanAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-emerald-950/50 hover:bg-emerald-900 text-emerald-300 rounded-md border border-emerald-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Снять теневой</button>
-                <button id="bulkUnassignProxyBtn" onclick="bulkUnassignProxyAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-indigo-950/50 hover:bg-indigo-900 text-indigo-300 rounded-md border border-indigo-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Снять прокси</button>
-                <button id="bulkBanBtn" onclick="bulkBanAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-amber-950/50 hover:bg-amber-900 text-amber-300 rounded-md border border-amber-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">В Бан</button>
-                <button id="bulkDeleteAccountsBtn" onclick="bulkDeleteAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-red-950/50 hover:bg-red-900 text-red-300 rounded-md border border-red-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Удалить выбранные</button>
-                <button id="bulkWarmupBtn" onclick="bulkWarmupAccounts()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-md border border-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase disabled:opacity-40 disabled:cursor-not-allowed">Прогрев</button>
-                <button onclick="document.getElementById('accountFileInput').click()" class="h-9 px-2.5 text-[11px] whitespace-nowrap bg-emerald-600 hover:bg-emerald-500 text-white rounded-md shadow-md shadow-emerald-900/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[0.96] transition-all font-semibold tracking-[0.03em] uppercase">Загрузить .txt</button>
-              </div>
-            </div>
+          <h2 class="text-lg font-semibold mb-4 flex items-center justify-between text-zinc-100">
+            <div class="section-title"><i class="fas fa-users" aria-hidden="true"></i><span>Аккаунты</span></div>
+            <span id="selectedAccountsBadge" class="inline-flex items-center h-6 px-2.5 text-xs bg-zinc-800 text-zinc-200 rounded-full border border-zinc-700">Выбрано: 0</span>
           </h2>
+          <div class="w-full pb-4">
+            <div class="toolbar-row pr-1">
+              <button id="bulkCheckLoginBtn" onclick="bulkCheckLoginAccounts()" class="btn-ui btn-subtle whitespace-nowrap">Проверить вход</button>
+              <button id="bulkShadowBanBtn" onclick="bulkShadowBanAccounts()" class="btn-ui btn-subtle whitespace-nowrap">Теневой 72ч</button>
+              <button id="bulkShadowUnbanBtn" onclick="bulkShadowUnbanAccounts()" class="btn-ui btn-positive whitespace-nowrap">Снять теневой</button>
+              <button id="bulkUnassignProxyBtn" onclick="bulkUnassignProxyAccounts()" class="btn-ui btn-neutral whitespace-nowrap">Снять прокси</button>
+              <button id="bulkBanBtn" onclick="bulkBanAccounts()" class="btn-ui btn-warn whitespace-nowrap">В Бан</button>
+              <button id="bulkDeleteAccountsBtn" onclick="bulkDeleteAccounts()" class="btn-ui btn-danger whitespace-nowrap">Удалить выбранные</button>
+              <button id="bulkWarmupBtn" onclick="bulkWarmupAccounts()" class="btn-ui btn-neutral whitespace-nowrap">Прогрев</button>
+              <button onclick="document.getElementById('accountImportModal').classList.remove('hidden')" class="btn-ui btn-neutral whitespace-nowrap">Импорт строк</button>
+              <button onclick="document.getElementById('accountFileInput').click()" class="btn-ui btn-primary whitespace-nowrap">Загрузить .txt</button>
+            </div>
+          </div>
           <div id="bulkActionStatus" class="sr-only" aria-live="polite"></div>
           <div id="uploadOverlay" class="hidden absolute inset-0 bg-emerald-900/90 backdrop-blur-sm rounded-xl z-10 flex flex-col items-center justify-center border-2 border-dashed border-emerald-400">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-emerald-400 mb-2 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+            <i class="fas fa-file-upload text-4xl text-emerald-400 mb-2 animate-bounce" aria-hidden="true"></i>
             <span class="font-bold text-emerald-100 text-lg">Бросай файлы сюда!</span>
           </div>
-          <div class="overflow-y-auto overflow-x-hidden max-h-[420px] border border-zinc-800 rounded-lg">
-            <table class="w-full text-sm table-fixed">
+          <div class="table-shell table-scroll-area">
+            <table class="accounts-table text-sm">
               <caption class="sr-only">Таблица аккаунтов для массовых действий</caption>
-              <thead class="sticky top-0 z-10 text-zinc-300 bg-zinc-950">
-                <tr>
-                  <th scope="col" class="py-3 pl-3 pr-1 font-semibold w-8 text-center">
+              <thead class="table-head-surface">
+                <tr class="table-head-row">
+                  <th scope="col" class="col-check py-3 pl-3 pr-1 font-semibold text-center">
                     <label class="touch-target">
                       <input id="selectAllAccounts" type="checkbox" onchange="toggleAllAccounts(this.checked)" class="selection-check" aria-label="Выбрать все аккаунты" />
                     </label>
                   </th>
-                  <th scope="col" class="hidden sm:table-cell py-3 pl-1 pr-2 font-semibold w-10 text-center">ID</th>
-                  <th scope="col" class="py-3 px-1 sm:px-2 font-semibold w-[32%] sm:w-[27%] text-center">Логин</th>
-                  <th scope="col" class="py-3 px-1 sm:px-2 font-semibold w-[30%] sm:w-[25%] text-center">Прокси</th>
-                  <th scope="col" class="py-3 px-1 sm:px-2 font-semibold w-[16%] sm:w-[14%] text-center">Статус</th>
+                  <th scope="col" class="col-id hidden md:table-cell py-3 pl-1 pr-2 font-semibold text-center">ID</th>
+                  <th scope="col" class="col-login py-3 px-1 sm:px-2 font-semibold text-left">Логин</th>
+                  <th scope="col" class="col-proxy hidden md:table-cell py-3 px-1 sm:px-2 font-semibold text-left">Прокси</th>
+                  <th scope="col" class="col-status hidden md:table-cell py-3 px-1 sm:px-2 font-semibold text-center">Статус</th>
                 </tr>
               </thead>
               <tbody id="accountsTable"></tbody>
@@ -298,19 +828,19 @@
           </div>
         </div>
 
-        <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 shadow-lg shadow-black/50">
+        <div class="panel-card panel-split-card rounded-xl p-4">
           <h2 class="text-lg font-semibold mb-4 flex items-center justify-between text-zinc-100">
-            <div class="flex items-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg> Прокси</div>
+            <div class="section-title"><i class="fas fa-network-wired" aria-hidden="true"></i><span>Прокси</span></div>
             <div class="flex items-center gap-2">
               <input id="proxySearch" oninput="filterProxies()" placeholder="Поиск (сессия/хост)" class="text-xs bg-zinc-950 border border-zinc-700 rounded px-2 py-1 focus:ring-1 focus:ring-emerald-500 outline-none w-32" />
-              <button onclick="bulkDeleteProxies()" class="h-9 text-[11px] bg-red-950/50 hover:bg-red-900 text-red-300 px-2.5 py-1.5 rounded border border-red-900/50 focus:outline-none focus:ring-2 focus:ring-red-500/50 active:scale-[0.96] transition-all font-bold tracking-wider uppercase">Удалить выбранные</button>
-              <button onclick="document.getElementById('proxyModal').classList.remove('hidden')" class="h-9 text-[11px] bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 rounded shadow-md shadow-emerald-900/20 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 active:scale-[0.96] transition-all font-bold tracking-wider uppercase">Импорт</button>
+              <button onclick="bulkDeleteProxies()" class="btn-ui btn-danger whitespace-nowrap">Удалить выбранные</button>
+              <button onclick="document.getElementById('proxyModal').classList.remove('hidden')" class="btn-ui btn-primary whitespace-nowrap">Импорт</button>
             </div>
           </h2>
-          <div class="overflow-auto max-h-[420px] border border-zinc-800 rounded-lg">
+          <div class="table-shell table-scroll-area">
             <table class="w-full text-sm">
-              <thead class="text-zinc-400 bg-zinc-950/50">
-                <tr>
+              <thead class="table-head-surface">
+                <tr class="table-head-row">
                   <th class="py-3 pl-4 pr-2 font-semibold w-12 text-center">
                     <label class="touch-target">
                       <input id="selectAllProxies" type="checkbox" onchange="toggleAllProxies(this.checked)" class="selection-check" />
@@ -328,15 +858,15 @@
         </div>
       </section>
 
-      <section class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 overflow-auto shadow-lg shadow-black/50">
+      <section class="panel-card rounded-xl p-4 overflow-auto">
         <h2 class="text-lg font-semibold mb-4 flex items-center justify-between text-zinc-100">
-          <div class="flex items-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg> Очередь задач</div>
-          <button onclick="clearTasks()" class="h-9 text-[11px] bg-red-950/30 hover:bg-red-900 text-red-400 hover:text-red-100 px-2.5 py-1.5 rounded border border-red-900/50 transition-all uppercase font-bold focus:outline-none focus:ring-2 focus:ring-red-500/50 active:scale-[0.96]">Очистить историю</button>
+          <div class="section-title"><i class="fas fa-stream" aria-hidden="true"></i><span>Очередь задач</span></div>
+          <button onclick="clearTasks()" class="btn-ui btn-danger whitespace-nowrap">Очистить историю</button>
         </h2>
-        <div class="border border-zinc-800 rounded-lg overflow-hidden">
+        <div class="table-shell overflow-auto">
           <table class="w-full text-sm">
-            <thead class="text-zinc-400 bg-zinc-950/50">
-              <tr>
+            <thead class="table-head-surface">
+              <tr class="table-head-row">
                 <th class="text-left py-3 pl-4 font-semibold">ID</th>
                 <th class="text-left py-3 font-semibold">Действие / Логи</th>
                 <th class="text-left py-3 font-semibold">Цель (URL)</th>
@@ -351,35 +881,40 @@
     </div>
 
     <!-- Proxy Import Modal -->
-    <div id="proxyModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50" role="dialog" aria-modal="true" aria-labelledby="proxyModalTitle">
-      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 max-w-lg w-full">
-        <h2 id="proxyModalTitle" class="text-xl font-bold mb-4 uppercase">Импорт прокси</h2>
-        <p class="text-sm text-zinc-400 mb-4">Вставьте список в формате <code>Имя|host:port:user:pass</code> (по одному в строке, имя опционально)</p>
-        <textarea id="proxyData" class="w-full h-48 bg-zinc-950 border border-zinc-700 rounded p-3 text-sm font-mono mb-4" placeholder="Мобильные|1.2.3.4:8080:user:pass"></textarea>
-        <div class="flex justify-end gap-3">
-          <button onclick="document.getElementById('proxyModal').classList.add('hidden')" class="px-4 py-2 text-zinc-400 hover:text-white">Отмена</button>
-          <button id="importProxiesBtn" class="bg-emerald-600 hover:bg-emerald-500 px-6 py-2 rounded font-bold">Залить</button>
+    <div id="proxyModal" class="modal-backdrop hidden fixed inset-0 flex items-center justify-center p-4 z-50" role="dialog" aria-modal="true" aria-labelledby="proxyModalTitle">
+      <div class="panel-card modal-panel p-6 max-w-lg">
+        <div class="modal-header">
+          <h2 id="proxyModalTitle" class="section-title text-xl font-bold uppercase"><i class="fas fa-file-import" aria-hidden="true"></i><span>Импорт прокси</span></h2>
+          <button type="button" onclick="document.getElementById('proxyModal').classList.add('hidden')" class="icon-btn modal-close text-lg leading-none" aria-label="Закрыть"><i class="fas fa-times" aria-hidden="true"></i></button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-note mb-4">Вставьте список в формате <code>Имя|host:port:user:pass</code> по одной строке. Имя опционально.</p>
+          <textarea id="proxyData" class="w-full h-48 rounded-xl px-4 py-3 text-sm font-mono" placeholder="Мобильные|1.2.3.4:8080:user:pass"></textarea>
+        </div>
+        <div class="modal-footer">
+          <button onclick="document.getElementById('proxyModal').classList.add('hidden')" class="btn-ui btn-neutral">Отмена</button>
+          <button id="importProxiesBtn" class="btn-ui btn-primary">Залить</button>
         </div>
       </div>
     </div>
 
-    <div id="accountEmailModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50" role="dialog" aria-modal="true" aria-labelledby="accountEmailModalTitle">
-      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 max-w-md w-full" tabindex="-1">
-        <div class="flex items-center justify-between mb-4">
-          <h2 id="accountEmailModalTitle" class="text-lg font-bold uppercase">Почта аккаунта</h2>
+    <div id="accountEmailModal" class="modal-backdrop hidden fixed inset-0 flex items-center justify-center p-4 z-50" role="dialog" aria-modal="true" aria-labelledby="accountEmailModalTitle">
+      <div class="panel-card modal-panel p-6 max-w-md" tabindex="-1">
+        <div class="modal-header">
+          <h2 id="accountEmailModalTitle" class="section-title text-lg font-bold uppercase"><i class="fas fa-envelope" aria-hidden="true"></i><span>Почта аккаунта</span></h2>
           <button
             type="button"
             onclick="closeAccountEmailModal()"
-            class="text-zinc-400 hover:text-zinc-100 text-xl leading-none"
+            class="icon-btn modal-close text-lg leading-none"
             aria-label="Закрыть"
           >
-            ×
+            <i class="fas fa-times" aria-hidden="true"></i>
           </button>
         </div>
-        <div class="space-y-3 text-sm">
+        <div class="modal-body space-y-4 text-sm">
           <div>
             <div class="text-zinc-500 text-xs uppercase tracking-wider mb-1">Аккаунт</div>
-            <div id="accountEmailAccountLogin" class="font-semibold text-zinc-100 break-all">-</div>
+            <div id="accountEmailAccountLogin" class="font-semibold text-zinc-100 break-all leading-snug">-</div>
           </div>
           <div>
             <div class="text-zinc-500 text-xs uppercase tracking-wider mb-1">Почта</div>
@@ -403,23 +938,54 @@
           </div>
           <div id="accountEmailStatus" class="text-xs min-h-[1rem] text-zinc-500"></div>
         </div>
-        <div class="mt-5 flex justify-end gap-2">
+        <div class="modal-footer">
           <button
             id="accountEmailSaveBtn"
             type="button"
             onclick="saveAccountEmailModal()"
-            class="px-3 py-1.5 text-xs bg-emerald-700 hover:bg-emerald-600 text-white rounded border border-emerald-600"
+            class="btn-ui btn-primary"
           >
             Сохранить
           </button>
           <button
             type="button"
             onclick="closeAccountEmailModal()"
-            class="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-100 rounded border border-zinc-700"
+            class="btn-ui btn-neutral"
           >
             Закрыть
           </button>
         </div>
+      </div>
+    </div>
+
+    <div id="accountImportModal" class="modal-backdrop hidden fixed inset-0 flex items-center justify-center p-4 z-50" role="dialog" aria-modal="true" aria-labelledby="accountImportModalTitle">
+      <div class="panel-card modal-panel p-6 max-w-2xl">
+        <div class="modal-header">
+          <h2 id="accountImportModalTitle" class="section-title text-lg font-bold uppercase"><i class="fas fa-users-cog" aria-hidden="true"></i><span>Импорт аккаунтов</span></h2>
+          <button type="button" onclick="closeAccountImportModal()" class="icon-btn modal-close text-lg leading-none" aria-label="Закрыть"><i class="fas fa-times" aria-hidden="true"></i></button>
+        </div>
+        <div class="modal-body">
+          <textarea
+            id="accountImportData"
+            class="w-full h-56 rounded-xl px-4 py-3 text-sm font-mono"
+            placeholder="Supported formats:&#10;1. login:password:email:email_password&#10;2. facebook giriş: LOGIN   şifre: PASS   mail: EMAIL   mail şifre: MAILPASS"
+          ></textarea>
+          <div id="accountImportStatus" class="text-xs text-zinc-500 min-h-[1rem] mt-3"></div>
+        </div>
+        <div class="modal-footer">
+          <button onclick="closeAccountImportModal()" class="btn-ui btn-neutral">Отмена</button>
+          <button id="importAccountsBtn" onclick="importAccountsFromText()" class="btn-ui btn-primary">Импортировать</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="warmupLogsModal" class="modal-backdrop hidden fixed inset-0 flex items-center justify-center p-4 z-50" role="dialog" aria-modal="true" aria-labelledby="warmupLogsTitle">
+      <div class="panel-card modal-panel p-6 max-w-lg">
+        <div class="modal-header">
+          <h2 id="warmupLogsTitle" class="section-title text-lg font-bold uppercase"><i class="fas fa-history" aria-hidden="true"></i><span>История прогрева</span></h2>
+          <button type="button" onclick="closeWarmupLogsModal()" class="icon-btn modal-close text-lg leading-none" aria-label="Закрыть"><i class="fas fa-times" aria-hidden="true"></i></button>
+        </div>
+        <div id="warmupLogsBody" class="modal-body space-y-2 max-h-80 overflow-y-auto text-sm"></div>
       </div>
     </div>
 
@@ -481,6 +1047,33 @@
           .replaceAll("'", "&#39;");
       }
 
+      function formatWarmupActionLabel(actionName) {
+        const labels = {
+          _warmup_scroll_feed: "Прокрутка ленты",
+          _warmup_watch_reels: "Просмотр Reels",
+          _warmup_like_random_post: "Лайк случайного поста",
+          _warmup_open_comments: "Открытие комментариев",
+          _warmup_visit_profile: "Переход в профиль",
+        };
+        const normalized = String(actionName || "");
+        return labels[normalized] || normalized.replace(/^_warmup_/, "").replaceAll("_", " ") || "Неизвестное действие";
+      }
+
+      function formatTaskActionLabel(actionType) {
+        const labels = {
+          comment_post: "Комментарий",
+          like_comment_bot: "Лайк комментария",
+          reply_comment: "Ответ на комментарий",
+          check_login: "Проверка входа",
+          warmup: "Прогрев аккаунта",
+          like_post: "Лайк поста",
+          follow: "Подписка",
+          like_comment: "Лайк комментария",
+        };
+        const normalized = String(actionType || "").toLowerCase();
+        return labels[normalized] || normalized || "-";
+      }
+
       function fillTaskFromComment(commentUrl, targetAction, targetAuthorId = "", targetAuthorName = "") {
         if (!commentUrl) return;
         urlField.value = commentUrl;
@@ -496,7 +1089,7 @@
       function renderParsedComments(comments) {
         if (!Array.isArray(comments) || comments.length === 0) {
           commentsTable.innerHTML = `
-            <tr class="border-t border-zinc-800 bg-zinc-900/20">
+            <tr class="table-body-row">
               <td class="py-4 pl-4 text-zinc-500 italic" colspan="4">Комментарии не найдены</td>
             </tr>`;
           return;
@@ -511,12 +1104,12 @@
             const dateStr = comment.date ? new Date(comment.date).toLocaleString("ru-RU") : "-";
             const likesCount = comment.likes_count || 0;
             return `
-              <tr class="comment-row border-t border-zinc-800 align-top cursor-pointer hover:bg-zinc-800 transition-colors"
+              <tr class="comment-row table-body-row align-top cursor-pointer"
                   data-comment-url="${commentUrl}"
                   data-comment-author-id="${authorId}"
                   data-comment-author-name="${author}">
                 <td class="py-3 pl-4 pr-2">
-                  <div class="font-medium text-sky-400">${author}</div>
+                  <div class="font-medium text-zinc-100">${author}</div>
                   <div class="text-xs text-zinc-500">${dateStr}</div>
                 </td>
                 <td class="py-3 pr-2 max-w-[480px] break-words">${text}</td>
@@ -537,13 +1130,56 @@
       }
 
       function statusBadge(status) {
-        const base = "px-2 py-0.5 rounded-full font-bold text-xs uppercase tracking-wider border ";
-        if (status === "active" || status === "success") return base + "bg-emerald-950/40 text-emerald-400 border-emerald-900/50";
-        if (status === "error" || status === "banned") return base + "bg-red-950/40 text-red-400 border-red-900/50";
-        if (status === "shadow_banned") return base + "bg-sky-950/40 text-sky-300 border-sky-900/50";
-        if (status === "limit" || status === "stopped") return base + "bg-yellow-950/40 text-yellow-400 border-yellow-900/50";
-        if (status === "checkpoint" || status === "in_progress") return base + "bg-amber-950/40 text-amber-400 border-amber-900/50";
-        return base + "bg-zinc-800/50 text-zinc-300 border-zinc-700";
+        const base = "account-status-badge inline-flex items-center justify-center h-7 px-2.5 rounded-full font-semibold text-[10px] uppercase tracking-[0.14em] border ";
+        if (status === "active" || status === "success") return base + "bg-emerald-500/7 text-zinc-100 border-emerald-400/15";
+        if (status === "error" || status === "banned") return base + "bg-red-500/7 text-zinc-100 border-red-400/14";
+        if (status === "invalid_credentials") return base + "bg-rose-500/8 text-zinc-100 border-rose-400/16";
+        if (status === "shadow_banned") return base + "bg-white/4 text-zinc-100 border-white/10";
+        if (status === "limit" || status === "stopped") return base + "bg-amber-500/8 text-zinc-100 border-amber-400/14";
+        if (status === "checkpoint" || status === "in_progress") return base + "bg-amber-500/8 text-zinc-100 border-amber-400/14";
+        return base + "bg-white/4 text-zinc-100 border-white/10";
+      }
+
+      function formatAccountStatusLabel(status) {
+        const labels = {
+          active: "ACTIVE",
+          banned: "BANNED",
+          shadow_banned: "SHADOW",
+          checkpoint: "CHECKPOINT",
+          captcha_blocked: "CAPTCHA",
+          invalid_credentials: "BAD LOGIN",
+          limit: "LIMIT",
+          stopped: "STOPPED",
+          in_progress: "RUNNING",
+          success: "SUCCESS",
+          error: "ERROR",
+        };
+        const normalized = String(status || "").toLowerCase();
+        return labels[normalized] || normalized.replaceAll("_", " ").toUpperCase();
+      }
+
+      function checkpointTypeIcon(checkpointType) {
+        if (!checkpointType) return "";
+        const type = String(checkpointType).toLowerCase();
+        if (type === "code_verification") return '<i class="fas fa-envelope meta-icon" title="Code checkpoint"></i>';
+        if (type === "face_verification") return '<i class="fas fa-id-card meta-icon" title="Face verification"></i>';
+        if (type === "suspicious_login") return '<i class="fas fa-exclamation-triangle meta-icon" title="Suspicious login"></i>';
+        if (type === "account_disabled") return '<i class="fas fa-ban meta-icon" title="Account disabled"></i>';
+        return '<i class="fas fa-exclamation-triangle meta-icon" title="Unknown checkpoint"></i>';
+      }
+
+      function proxyTypeIcon(proxyType) {
+        const type = String(proxyType || "datacenter").toLowerCase();
+        if (type === "mobile") return '<i class="fas fa-mobile-alt meta-icon" title="Mobile proxy"></i>';
+        if (type === "residential") return '<i class="fas fa-home meta-icon" title="Residential proxy"></i>';
+        if (type === "datacenter") return '<i class="fas fa-server meta-icon" title="Datacenter proxy"></i>';
+        return "";
+      }
+
+      function isRecentlyWarmed(warmedUpAt) {
+        if (!warmedUpAt) return false;
+        const diffMs = Date.now() - new Date(warmedUpAt).getTime();
+        return diffMs >= 0 && diffMs < (6 * 3600 * 1000);
       }
 
       function getShadowBanRemainingMs(account) {
@@ -563,7 +1199,13 @@
       }
 
       function renderAccountStatus(account) {
-        const badge = `<span class="${statusBadge(account.status)}">${account.status}</span>`;
+        const checkpointIcon = checkpointTypeIcon(account.last_checkpoint_type);
+        const badge = `
+          <div class="flex items-center justify-center gap-1.5">
+            <span class="${statusBadge(account.status)}">${escapeHtml(formatAccountStatusLabel(account.status))}</span>
+            ${checkpointIcon}
+          </div>
+        `;
         const leftMs = getShadowBanRemainingMs(account);
         if (account.status !== "shadow_banned") return badge;
         const timer = leftMs > 0 ? formatCountdown(leftMs) : "00:00:00";
@@ -571,7 +1213,7 @@
           <div class="flex flex-col items-center gap-1 text-center">
             ${badge}
             <span
-              class="text-xs font-mono text-sky-300/90 shadow-ban-timer"
+              class="text-[11px] font-mono text-zinc-400 shadow-ban-timer"
               data-shadow-ban-until="${account.shadow_ban_until || ""}"
             >таймер: ${timer}</span>
           </div>
@@ -678,6 +1320,185 @@
         }
       }
 
+      function closeAccountImportModal() {
+        const modal = document.getElementById("accountImportModal");
+        modal.classList.add("hidden");
+        document.getElementById("accountImportStatus").textContent = "";
+      }
+
+      async function importAccountsFromText() {
+        const btn = document.getElementById("importAccountsBtn");
+        const textarea = document.getElementById("accountImportData");
+        const status = document.getElementById("accountImportStatus");
+        const rawData = textarea.value.trim();
+        if (!rawData) {
+          status.textContent = "Введите данные для импорта";
+          status.className = "text-xs text-red-400 min-h-[1rem]";
+          return;
+        }
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Импорт...';
+        status.textContent = "Импортируем...";
+        status.className = "text-xs text-zinc-500 min-h-[1rem]";
+        try {
+          const response = await fetch("/api/accounts/import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ raw_data: rawData }),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            status.textContent = payload.detail || "Ошибка импорта";
+            status.className = "text-xs text-red-400 min-h-[1rem]";
+            return;
+          }
+          status.textContent = `Импортировано: ${payload.imported}, ошибок: ${payload.failed}`;
+          status.className = "text-xs text-emerald-400 min-h-[1rem]";
+          await refreshAccounts();
+        } catch (error) {
+          console.error(error);
+          status.textContent = "Сетевая ошибка";
+          status.className = "text-xs text-red-400 min-h-[1rem]";
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Импортировать";
+        }
+      }
+
+      async function showWarmupLogs(accountId) {
+        const body = document.getElementById("warmupLogsBody");
+        body.innerHTML = '<div class="text-zinc-500"><i class="fas fa-spinner fa-spin mr-1"></i> Загрузка...</div>';
+        activeWarmupLogsAccount = accountId;
+        document.getElementById("warmupLogsModal").classList.remove("hidden");
+        try {
+          const response = await fetch(`/api/accounts/${accountId}/warmup/logs?limit=5`);
+          const payload = await response.json();
+          if (!response.ok) {
+            body.innerHTML = `<div class="text-red-400">${escapeHtml(payload.detail || "Ошибка загрузки")}</div>`;
+            return;
+          }
+          if (!Array.isArray(payload) || payload.length === 0) {
+            body.innerHTML = '<div class="text-zinc-500">Логи прогрева отсутствуют</div>';
+            return;
+          }
+          body.innerHTML = payload.map((item) => {
+            const started = item.started_at ? new Date(item.started_at).toLocaleString("ru-RU") : "-";
+            const duration = item.duration_seconds ?? 0;
+            const resultTone = item.result === "completed"
+              ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-200"
+              : (item.result === "error"
+                ? "border-red-500/20 bg-red-500/10 text-red-200"
+                : "border-amber-500/20 bg-amber-500/10 text-amber-200");
+            const actionsHtml = Array.isArray(item.action_log) && item.action_log.length
+              ? `<div class="mt-3 space-y-2">
+                  ${item.action_log.map((entry) => {
+                    const isOk = entry.status === "ok";
+                    const iconClass = isOk ? "fa-check" : "fa-exclamation-triangle";
+                    const toneClass = isOk ? "text-emerald-300" : "text-red-300";
+                    const errorHtml = entry.error
+                      ? `<div class="text-[11px] text-red-300/90 mt-1">${escapeHtml(entry.error)}</div>`
+                      : "";
+                    return `
+                      <div class="rounded-lg border border-white/6 bg-white/[0.02] px-3 py-2">
+                        <div class="flex items-start justify-between gap-3">
+                          <div class="min-w-0">
+                            <div class="flex items-center gap-2">
+                              <i class="fas ${iconClass} ${toneClass}" aria-hidden="true"></i>
+                              <span class="text-xs text-zinc-100">${escapeHtml(formatWarmupActionLabel(entry.action))}</span>
+                            </div>
+                            ${errorHtml}
+                          </div>
+                          <span class="shrink-0 text-[11px] text-zinc-500">${Number(entry.duration_ms || 0)} мс</span>
+                        </div>
+                      </div>
+                    `;
+                  }).join("")}
+                </div>`
+              : "";
+            const errorBlock = item.error_message
+              ? `<div class="mt-3 text-[11px] text-red-300">${escapeHtml(item.error_message)}</div>`
+              : "";
+            return `
+              <div class="border border-white/6 rounded-xl p-3 bg-white/[0.03]">
+                <div class="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                  <span>${started}</span>
+                  <span class="inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${resultTone}">${escapeHtml(item.result)}</span>
+                </div>
+                <div class="text-xs text-zinc-300">Длительность: ${duration}s</div>
+                <div class="text-xs text-zinc-300">Успешно: ${item.actions_succeeded} / Ошибки: ${item.actions_failed}</div>
+                ${actionsHtml}
+                ${errorBlock}
+              </div>
+            `;
+          }).join("");
+        } catch (error) {
+          console.error(error);
+          body.innerHTML = '<div class="text-red-400">Сетевая ошибка</div>';
+        }
+      }
+
+      function closeWarmupLogsModal() {
+        activeWarmupLogsAccount = null;
+        document.getElementById("warmupLogsModal").classList.add("hidden");
+      }
+
+      async function startAccountWarmup(accountId, buttonNode) {
+        const btn = buttonNode;
+        if (!btn) return;
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>';
+        try {
+          const response = await fetch(`/api/accounts/${accountId}/warmup`, {
+            method: "POST",
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            alert(payload.detail || "Не удалось поставить аккаунт на прогрев");
+            return;
+          }
+          await Promise.all([refreshAccounts(), refreshTasks()]);
+          if (payload.status === "skipped") {
+            alert(payload.reason || "Аккаунт недавно уже прогревался.");
+            return;
+          }
+          if (payload.status === "queued") {
+            setBulkActionStatus(`Прогрев поставлен в очередь: задача #${payload.task_id}`);
+          }
+        } catch (error) {
+          console.error(error);
+          alert("Сетевая ошибка");
+        } finally {
+          btn.disabled = false;
+          btn.innerHTML = originalHtml;
+        }
+      }
+
+      async function rotateAccountIp(accountId, buttonNode) {
+        const btn = buttonNode;
+        if (!btn) return;
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        try {
+          const response = await fetch(`/api/accounts/${accountId}/rotate-ip`, { method: "POST" });
+          const payload = await response.json();
+          if (!response.ok) {
+            alert(payload.detail || "Не удалось повернуть IP");
+            return;
+          }
+          const newIp = payload.new_ip || "unknown";
+          btn.title = `Новый IP: ${newIp}`;
+          await refreshAccounts();
+        } catch (error) {
+          console.error(error);
+          alert("Сетевая ошибка");
+        } finally {
+          btn.disabled = false;
+          btn.innerHTML = originalHtml;
+        }
+      }
+
       let allProxies = [];
       let allAccounts = [];
       const selectedAccountIds = new Set();
@@ -685,6 +1506,7 @@
       let isBulkActionRunning = false;
       let lastFocusedElement = null;
       let activeAccountEmailId = null;
+      let activeWarmupLogsAccount = null;
 
       function setBulkActionStatus(message) {
         const el = document.getElementById("bulkActionStatus");
@@ -826,7 +1648,7 @@
         table.innerHTML = proxies
           .map(
             (p) => `
-            <tr class="border-t border-zinc-800 hover:bg-zinc-900/50 transition-colors">
+            <tr class="table-body-row dashboard-table-row">
               <td class="w-12 py-2 pl-4 pr-2 text-center">
                 <label class="touch-target mx-auto">
                   <input
@@ -840,15 +1662,15 @@
                 </label>
               </td>
               <td class="py-2 pl-1 text-zinc-500 font-mono text-xs text-center">${p.id}</td>
-              <td class="py-2 text-zinc-300 font-mono text-xs text-center">
-                <div class="text-emerald-400 font-bold uppercase tracking-tight mb-1">${p.name || ""}</div>
-                <div class="text-sky-400 font-bold">${p.session_id || "-"}</div>
+              <td class="py-2 text-zinc-300 font-mono text-xs text-center leading-relaxed">
+                <div class="text-zinc-100 font-semibold uppercase tracking-[0.14em] mb-1">${p.name || ""}</div>
+                <div class="text-zinc-300 font-semibold">${p.session_id || "-"}</div>
                 <div class="text-zinc-500">${p.host}:${p.port}</div>
               </td>
               <td class="py-2 text-zinc-400 text-xs italic text-center">${p.in_use_by_account || "-"}</td>
               <td class="py-2 text-center">
-                <button onclick="toggleProxy(${p.id})" title="Переключить статус" class="touch-target mx-auto rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500 active:scale-95 transition-all">
-                  <span class="${p.is_active ? 'text-emerald-400' : 'text-red-400'} text-xs uppercase font-bold tracking-tighter">
+                <button onclick="toggleProxy(${p.id})" title="Переключить статус" class="touch-target mx-auto rounded-md focus:outline-none focus:ring-1 focus:ring-white/10 active:scale-95 transition-all">
+                  <span class="${p.is_active ? 'text-zinc-100 border-white/10 bg-white/5' : 'text-zinc-400 border-white/6 bg-white/[0.03]'} inline-flex h-7 items-center rounded-full border px-2 text-[10px] uppercase font-semibold tracking-[0.14em]">
                     ${p.is_active ? 'Online' : 'Offline'}
                   </span>
                 </button>
@@ -1086,7 +1908,7 @@
           }
           selectedAccountIds.clear();
           setBulkActionStatus(
-            `Готово: прогрето ${payload.done ?? 0}, пропущено ${payload.skipped_not_active?.length ?? 0}, ошибок ${payload.failed?.length ?? 0}`
+            `Поставлено в очередь: ${payload.queued ?? 0}, пропущено недавно прогретых: ${payload.skipped_recent ?? 0}, неактивных: ${payload.skipped_not_active?.length ?? 0}`
           );
           await Promise.all([refreshAccounts(), refreshTasks()]);
         } finally {
@@ -1160,6 +1982,11 @@
         table.innerHTML = accounts
           .map(
             (a) => {
+              const isWarm = isRecentlyWarmed(a.warmed_up_at);
+              const warmupIconClass = isWarm ? "fa-fire" : "fa-snowflake";
+              const warmupTitle = isWarm ? "Сессия недавно прогрета" : "Прогрев не выполнялся недавно";
+              const proxyIcon = a.proxy_id ? proxyTypeIcon(a.proxy_type) : "";
+              const canRotateIp = a.proxy_id && String(a.proxy_type || "").toLowerCase() === "mobile" && !!a.proxy_rotation_url;
               const proxyOptions = `<option value="">Без прокси</option>` + allProxies.map(p => {
                 const isBusyByOther = p.in_use_by_account && a.proxy_id !== p.id;
                 const sessionLabel = p.session_id ? ` [${p.session_id}]` : '';
@@ -1168,7 +1995,7 @@
                 return `<option value="${p.id}" ${a.proxy_id === p.id ? 'selected' : ''} ${isBusyByOther ? 'disabled' : ''}>${label}</option>`;
               }).join("");              
               return `
-              <tr class="border-t border-zinc-800 hover:bg-zinc-900/50 transition-colors">
+              <tr class="table-body-row dashboard-table-row">
                 <td class="w-8 py-2.5 pl-3 pr-1 text-center">
                   <label class="touch-target mx-auto">
                     <input
@@ -1182,29 +2009,83 @@
                     />
                   </label>
                 </td>
-                <td class="hidden sm:table-cell py-3 pl-1 pr-2 text-zinc-500 font-mono text-xs text-center">${a.id}</td>
-                <td class="py-3 px-1 sm:px-2 text-zinc-200 font-semibold text-center">
-                  <div class="flex items-center justify-center gap-1.5 min-w-0">
-                    <span class="leading-tight break-all">${a.login}</span>
+                <td class="hidden md:table-cell py-3 pl-1 pr-2 text-zinc-500 font-mono text-xs text-center">${a.id}</td>
+                <td class="py-3 px-1 sm:px-2 text-left">
+                  <div class="account-login-cell min-w-0">
+                    <span class="account-login-text">${a.login}</span>
+                    <div class="account-login-actions">
                     <button
                       type="button"
                       onclick="showAccountEmailModal(${a.id})"
-                      class="touch-target-sm rounded-md hover:bg-zinc-800 transition-colors focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      class="action-icon-btn"
                       title="Почта аккаунта"
                       aria-label="Почта аккаунта ${a.login}"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-zinc-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M21.75 7.5v9A2.25 2.25 0 0 1 19.5 18.75h-15A2.25 2.25 0 0 1 2.25 16.5v-9m19.5 0A2.25 2.25 0 0 0 19.5 5.25h-15A2.25 2.25 0 0 0 2.25 7.5m19.5 0-8.69 5.212a2.25 2.25 0 0 1-2.32 0L2.25 7.5" />
-                      </svg>
+                      <i class="far fa-envelope" aria-hidden="true"></i>
                     </button>
+                    <button
+                      type="button"
+                      onclick="showWarmupLogs(${a.id})"
+                      class="action-icon-btn"
+                      title="${warmupTitle}"
+                      aria-label="История прогрева ${a.login}"
+                    >
+                      <i class="fas ${warmupIconClass}" aria-hidden="true"></i>
+                    </button>
+                    <button
+                      type="button"
+                      onclick="startAccountWarmup(${a.id}, this)"
+                      class="action-icon-btn"
+                      title="Запустить прогрев"
+                      aria-label="Запустить прогрев ${a.login}"
+                    >
+                      <i class="fas fa-play" aria-hidden="true"></i>
+                    </button>
+                    </div>
+                    <div class="mobile-account-inline md:hidden">
+                      ${renderAccountStatus(a)}
+                      ${proxyIcon ? `<span class="inline-flex items-center justify-center h-7 px-2 rounded-full border border-white/8 bg-white/4">${proxyIcon}</span>` : ""}
+                      ${canRotateIp ? `
+                        <button
+                          type="button"
+                          onclick="rotateAccountIp(${a.id}, this)"
+                          class="action-icon-btn"
+                          title="Rotate IP"
+                          aria-label="Rotate IP for account ${a.login}"
+                        >
+                          <i class="fas fa-sync" aria-hidden="true"></i>
+                        </button>
+                      ` : ""}
+                    </div>
+                    <div class="mobile-account-proxy md:hidden">
+                      <select onchange="updateAccountProxy(${a.id}, this.value)" class="rounded-xl px-2.5 py-2 text-[11px] w-full min-w-0 focus:outline-none cursor-pointer">
+                        ${proxyOptions}
+                      </select>
+                    </div>
                   </div>
                 </td>
-                <td class="py-3 px-1 sm:px-2 text-center">
-                  <select onchange="updateAccountProxy(${a.id}, this.value)" class="bg-zinc-950 border border-zinc-700 rounded px-1.5 sm:px-2 py-1.5 text-[11px] sm:text-xs text-zinc-300 w-full min-w-0 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer text-center">
-                    ${proxyOptions}
-                  </select>
+                <td class="hidden md:table-cell py-3 px-1 sm:px-2 text-left">
+                  <div class="account-proxy-cell">
+                    <select onchange="updateAccountProxy(${a.id}, this.value)" class="rounded-xl px-2.5 py-2 text-[11px] w-full min-w-0 focus:outline-none cursor-pointer">
+                      ${proxyOptions}
+                    </select>
+                    <div class="account-proxy-meta text-xs">
+                      ${proxyIcon}
+                      ${canRotateIp ? `
+                        <button
+                          type="button"
+                          onclick="rotateAccountIp(${a.id}, this)"
+                          class="action-icon-btn"
+                          title="Rotate IP"
+                          aria-label="Rotate IP for account ${a.login}"
+                        >
+                          <i class="fas fa-sync" aria-hidden="true"></i>
+                        </button>
+                      ` : ""}
+                    </div>
+                  </div>
                 </td>
-                <td class="py-3 px-1 sm:px-2 text-center">${renderAccountStatus(a)}</td>
+                <td class="hidden md:table-cell py-3 px-1 sm:px-2 text-center"><div class="account-status-wrap">${renderAccountStatus(a)}</div></td>
               </tr>`
             }
           )
@@ -1221,29 +2102,29 @@
           .map(
             (t) => {
               const logsHtml = t.logs && t.logs.length 
-                ? `<div class="mt-2 text-xs bg-black/40 rounded p-2 border border-zinc-800 max-h-56 overflow-y-auto font-mono">
-                    ${t.logs.map(l => `<div class="mb-1 border-b border-zinc-800/50 pb-1 last:border-0 last:pb-0">
-                      <span class="text-emerald-700/80 mr-1">${new Date(l.created_at).toLocaleTimeString()}</span> <span class="text-zinc-400">${escapeHtml(l.message)}</span>
+                ? `<div class="mt-2 text-xs bg-white/[0.03] rounded-xl p-2.5 border border-white/6 max-h-56 overflow-y-auto font-mono">
+                    ${t.logs.map(l => `<div class="mb-1 border-b border-white/6 pb-1 last:border-0 last:pb-0">
+                      <span class="text-zinc-500 mr-1">${new Date(l.created_at).toLocaleTimeString()}</span> <span class="text-zinc-400">${escapeHtml(l.message)}</span>
                     </div>`).join("")}
                    </div>`
                 : "";
 
               return `
-                <tr class="border-t border-zinc-800 align-top hover:bg-zinc-900/50 transition-colors">
+                <tr class="table-body-row align-top">
                   <td class="py-3 pl-4 pr-2 font-mono text-zinc-500 text-xs">${t.id}</td>
                   <td class="py-3 pr-2">
-                    <div class="font-semibold text-emerald-500 text-[11px] uppercase tracking-widest">${t.action_type}</div>
+                    <div class="font-semibold text-zinc-100 text-[11px] uppercase tracking-[0.18em]">${escapeHtml(formatTaskActionLabel(t.action_type))}</div>
                     ${logsHtml}
                   </td>
-                  <td class="py-3 pr-2 max-w-[150px] break-all text-xs text-zinc-400">
-                    <a href="${t.target_url}" target="_blank" class="hover:text-sky-400 underline decoration-zinc-700 transition-colors">${t.target_url}</a>
+                  <td class="py-3 pr-2 max-w-[190px] text-xs text-zinc-400">
+                    <a href="${t.target_url}" target="_blank" title="${escapeHtml(t.target_url)}" class="task-url-link hover:text-zinc-200 underline decoration-zinc-700 transition-colors">${t.target_url}</a>
                   </td>
                   <td class="py-3 pr-2 text-zinc-500 font-mono text-xs italic">${t.external_order_id ?? "-"}</td>
                   <td class="py-3 pr-4 text-right">
                     <div class="flex flex-col items-end gap-1">
                       <span class="${statusBadge(t.status)}">${t.status}</span>
                       ${(t.status === 'pending' || t.status === 'in_progress') 
-                        ? `<button onclick="stopTask(${t.id})" aria-label="Остановить задачу" class="h-9 text-[11px] bg-red-950/40 hover:bg-red-900 text-red-300 px-2 py-0.5 rounded border border-red-900/50 focus:outline-none focus:ring-1 focus:ring-red-500 active:scale-95 transition-all uppercase tracking-wider font-bold">Стоп</button>` 
+                        ? `<button onclick="stopTask(${t.id})" aria-label="Остановить задачу" class="btn-ui btn-danger h-8 px-2.5 py-0 text-[10px]">Стоп</button>` 
                         : ''}
                     </div>
                   </td>
@@ -1346,7 +2227,7 @@
           parserDebugLog.textContent = "Ошибка при парсинге (см. серверные логи).";
           parserWarning.textContent = "Не удалось получить ответ от сервера.";
           commentsTable.innerHTML = `
-            <tr class="border-t border-zinc-800">
+            <tr class="table-body-row">
               <td class="py-3 text-red-400" colspan="3">Ошибка парсинга</td>
             </tr>`;
         } finally {
@@ -1398,6 +2279,8 @@
 
       const accountEmailModal = document.getElementById("accountEmailModal");
       const proxyModal = document.getElementById("proxyModal");
+      const accountImportModal = document.getElementById("accountImportModal");
+      const warmupLogsModal = document.getElementById("warmupLogsModal");
 
       accountEmailModal.addEventListener("click", (event) => {
         if (event.target === accountEmailModal) {
@@ -1409,6 +2292,16 @@
           proxyModal.classList.add("hidden");
         }
       });
+      accountImportModal.addEventListener("click", (event) => {
+        if (event.target === accountImportModal) {
+          closeAccountImportModal();
+        }
+      });
+      warmupLogsModal.addEventListener("click", (event) => {
+        if (event.target === warmupLogsModal) {
+          closeWarmupLogsModal();
+        }
+      });
 
       document.addEventListener("keydown", (event) => {
         if (event.key !== "Escape") return;
@@ -1418,6 +2311,14 @@
         }
         if (!proxyModal.classList.contains("hidden")) {
           proxyModal.classList.add("hidden");
+          return;
+        }
+        if (!accountImportModal.classList.contains("hidden")) {
+          closeAccountImportModal();
+          return;
+        }
+        if (!warmupLogsModal.classList.contains("hidden")) {
+          closeWarmupLogsModal();
         }
       });
 

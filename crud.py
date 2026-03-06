@@ -39,6 +39,9 @@ async def upsert_account(
     default_proxy_id: int | None = None,
     email_login: str | None = None,
     email_password: str | None = None,
+    imap_server: str | None = None,
+    proxy_type: str | None = None,
+    proxy_rotation_url: str | None = None,
 ) -> Account:
     """Updates an existing account or creates a new one with an available proxy."""
     account = await session.scalar(select(Account).where(Account.login == login))
@@ -55,6 +58,9 @@ async def upsert_account(
             user_agent=user_agent,
             email_login=email_login,
             email_password=email_password,
+            imap_server=imap_server,
+            proxy_type=proxy_type or "datacenter",
+            proxy_rotation_url=proxy_rotation_url,
         )
         session.add(account)
     else:
@@ -64,6 +70,14 @@ async def upsert_account(
             account.email_login = email_login
         if email_password:
             account.email_password = email_password
+        if imap_server:
+            account.imap_server = imap_server
+        if proxy_type:
+            account.proxy_type = proxy_type
+        if proxy_rotation_url is not None:
+            account.proxy_rotation_url = proxy_rotation_url
+        if not account.proxy_type:
+            account.proxy_type = "datacenter"
         if account.proxy_id is None:
             account.proxy_id = await get_available_proxy_id(session) or default_proxy_id
         account.status = AccountStatus.ACTIVE

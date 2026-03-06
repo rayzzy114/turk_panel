@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from imap_utils import guess_imap_server
 from models import Base, Proxy
 from crud import upsert_account
 
@@ -43,6 +44,15 @@ _CRED_RE_TURKISH = re.compile(
     r"(?:facebook\s*giri[sş]:|İD:|ID:)\s*(\S+)\s*(?:[ŞşSs]ifre:|password:)\s*(\S+)",
     re.IGNORECASE,
 )
+TURKISH_FORMAT_RE = re.compile(
+    r"facebook\s+giriş\s*:\s*(\S+)"
+    r".*?şifre\s*:\s*(\S+)"
+    r".*?mail\s*:\s*(\S+@\S+)"
+    r".*?mail\s+şifre\s*:\s*(\S+)",
+    re.IGNORECASE | re.DOTALL,
+)
+PARENTHETICAL_NOTES_RE = re.compile(r"\([^)]*\)")
+ROTATION_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 _GENDER_MAP = {
     "M": {"male", "man", "men", "boy", "masc", "m", "муж", "мужской", "парень"},
@@ -114,6 +124,20 @@ class ParsedAccount:
     gender: str
     email_login: str | None = None
     email_password: str | None = None
+    imap_server: str | None = None
+
+
+@dataclass(slots=True)
+class AccountImportRow:
+    """Normalized parsed account row for bulk import endpoints."""
+
+    facebook_login: str
+    facebook_password: str
+    email_login: str | None = None
+    email_password: str | None = None
+    imap_server: str | None = None
+    proxy_type: str | None = None
+    proxy_rotation_url: str | None = None
 
 
 @dataclass(slots=True)
@@ -124,6 +148,101 @@ class ProxyParts:
     password: str | None
     session_id: str | None
     name: str | None = None
+
+
+def _extract_rotation_url(text: str) -> str | None:
+    """Extracts an optional mobile proxy rotation URL from a line."""
+    match = ROTATION_URL_RE.search(text)
+    if not match:
+        return None
+    return match.group(0).rstrip(".,;")
+
+
+def _apply_proxy_hints(row: AccountImportRow, source_line: str) -> AccountImportRow:
+    """Annotates parsed account row with proxy type hints based on line content."""
+    rotation_url = _extract_rotation_url(source_line)
+    if rotation_url:
+        row.proxy_rotation_url = rotation_url
+        row.proxy_type = "mobile"
+        return row
+    if not row.proxy_type:
+        row.proxy_type = "datacenter"
+    return row
+
+
+def parse_turkish_account_format(text: str) -> AccountImportRow | None:
+    """
+    Parses Turkish shop credentials format into AccountImportRow.
+
+    Expected format:
+    "facebook giriş: LOGIN   şifre: PASS   mail: EMAIL   mail şifre: MAILPASS"
+    """
+    cleaned = PARENTHETICAL_NOTES_RE.sub(" ", text).strip()
+    if not cleaned:
+        return None
+    match = TURKISH_FORMAT_RE.search(cleaned)
+    if not match:
+        return None
+
+    facebook_login = match.group(1).strip()
+    facebook_password = match.group(2).strip()
+    email_login = match.group(3).strip()
+    email_password = match.group(4).strip()
+    if not (facebook_login and facebook_password and email_login and email_password):
+        return None
+
+    row = AccountImportRow(
+        facebook_login=facebook_login,
+        facebook_password=facebook_password,
+        email_login=email_login,
+        email_password=email_password,
+        imap_server=guess_imap_server(email_login),
+    )
+    return _apply_proxy_hints(row, cleaned)
+
+
+def parse_colon_format(line: str) -> AccountImportRow | None:
+    """
+    Parses legacy colon format:
+    login:password[:email[:email_password]]
+    """
+    value = line.strip()
+    if not value:
+        return None
+
+    parts = [chunk.strip() for chunk in value.split(":")]
+    if len(parts) < 2:
+        return None
+
+    login = parts[0]
+    password = parts[1]
+    if not login or not password:
+        return None
+
+    email_login = parts[2] if len(parts) >= 3 and "@" in parts[2] else None
+    email_password = parts[3] if len(parts) >= 4 else None
+    imap_server = guess_imap_server(email_login) if email_login else None
+    row = AccountImportRow(
+        facebook_login=login,
+        facebook_password=password,
+        email_login=email_login,
+        email_password=email_password,
+        imap_server=imap_server,
+    )
+    return _apply_proxy_hints(row, value)
+
+
+def detect_and_parse_line(line: str) -> AccountImportRow | None:
+    """Autodetects supported account line format and returns parsed row."""
+    value = line.strip()
+    if not value:
+        return None
+    lowered = value.lower()
+    if "giriş" in lowered or "mail şifre" in lowered or "facebook giriş" in lowered:
+        parsed = parse_turkish_account_format(value)
+        if parsed:
+            return parsed
+    return parse_colon_format(value)
 
 
 def parse_proxy_string(raw: str) -> ProxyParts:
@@ -322,6 +441,7 @@ def _try_parse_json_cookies(content: str) -> ParsedAccount | None:
                     cookies=cookies,
                     user_agent=DEFAULT_USER_AGENT,
                     gender="ANY",
+                    imap_server=None,
                 )
     except Exception:
         pass
@@ -386,6 +506,7 @@ def parse_account_text(
         gender=gender,
         email_login=email_login,
         email_password=email_password,
+        imap_server=guess_imap_server(email_login) if email_login else None,
     )
 
 
@@ -489,6 +610,9 @@ async def import_data(
                     gender=parsed.gender,
                     cookies=parsed.cookies,
                     default_proxy_id=default_proxy_id,
+                    email_login=parsed.email_login,
+                    email_password=parsed.email_password,
+                    imap_server=parsed.imap_server,
                 )
 
                 imported += 1

@@ -193,6 +193,66 @@ def test_parse_account_text_keeps_email_credentials_from_colon_format() -> None:
     assert result.email_password == "mail-pass-777"
 
 
+def test_parse_turkish_account_format_valid_input() -> None:
+    from import_data import parse_turkish_account_format
+
+    text = (
+        "facebook giriş: 61581112340247   şifre: l51dxqwk033e11   "
+        "mail: tillielarriva36@kh-mail.com   mail şifre: 75f7797d8073"
+    )
+
+    row = parse_turkish_account_format(text)
+
+    assert row is not None
+    assert row.facebook_login == "61581112340247"
+    assert row.facebook_password == "l51dxqwk033e11"
+    assert row.email_login == "tillielarriva36@kh-mail.com"
+    assert row.email_password == "75f7797d8073"
+    assert row.imap_server == "imap.kh-mail.com"
+
+
+def test_parse_turkish_account_format_missing_fields_returns_none() -> None:
+    from import_data import parse_turkish_account_format
+
+    text = "facebook giriş: 61581112340247   şifre: only_fb_password"
+
+    assert parse_turkish_account_format(text) is None
+
+
+def test_parse_turkish_account_format_handles_whitespace_and_parenthetical_notes() -> (
+    None
+):
+    from import_data import parse_turkish_account_format
+
+    text = """
+        facebook giriş:   61581112340247
+        şifre:   l51dxqwk033e11
+        mail:   tillielarriva36@kh-mail.com
+        mail şifre:   75f7797d8073
+        (mail adresine www.kh-mail.com adresinden ulaşabilirsiniz.)
+    """
+
+    row = parse_turkish_account_format(text)
+
+    assert row is not None
+    assert row.facebook_login == "61581112340247"
+    assert row.email_login == "tillielarriva36@kh-mail.com"
+
+
+def test_detect_and_parse_line_prefers_turkish_format() -> None:
+    from import_data import detect_and_parse_line
+
+    line = (
+        "facebook giriş: 61581112340247 şifre: l51dxqwk033e11 "
+        "mail: tillielarriva36@kh-mail.com mail şifre: 75f7797d8073"
+    )
+    row = detect_and_parse_line(line)
+
+    assert row is not None
+    assert row.facebook_login == "61581112340247"
+    assert row.email_password == "75f7797d8073"
+
+
 @pytest.mark.asyncio
 async def test_iter_account_sources_reads_zip_in_memory_without_extraction(
     tmp_path: Path,

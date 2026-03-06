@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import enum
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import (
@@ -30,6 +30,17 @@ class AccountStatus(str, enum.Enum):
     SHADOW_BANNED = "shadow_banned"
     CHECKPOINT = "checkpoint"
     CAPTCHA_BLOCKED = "captcha_blocked"
+    INVALID_CREDENTIALS = "invalid_credentials"
+
+
+class CheckpointType(str, enum.Enum):
+    """Normalized Facebook checkpoint type values."""
+
+    CODE_VERIFICATION = "code_verification"
+    FACE_VERIFICATION = "face_verification"
+    SUSPICIOUS_LOGIN = "suspicious_login"
+    ACCOUNT_DISABLED = "account_disabled"
+    UNKNOWN_CHECKPOINT = "unknown_checkpoint"
 
 
 class TaskActionType(str, enum.Enum):
@@ -40,6 +51,7 @@ class TaskActionType(str, enum.Enum):
     LIKE_COMMENT_BOT = "like_comment_bot"
     REPLY_COMMENT = "reply_comment"
     CHECK_LOGIN = "check_login"
+    WARMUP = "warmup"
 
 
 class TaskStatus(str, enum.Enum):
@@ -104,9 +116,15 @@ class Account(Base):
     warmed_up_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    last_checkpoint_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    proxy_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    proxy_rotation_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     proxy: Mapped[Proxy | None] = relationship(back_populates="accounts")
     tasks: Mapped[list["Task"]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
+    warmup_logs: Mapped[list["WarmupLog"]] = relationship(
         back_populates="account", cascade="all, delete-orphan"
     )
 
@@ -156,3 +174,25 @@ class Log(Base):
     )
 
     task: Mapped[Task] = relationship(back_populates="logs")
+
+
+class WarmupLog(Base):
+    """Stores detailed metrics for one warmup session run."""
+
+    __tablename__ = "warmup_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC)
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actions_attempted: Mapped[int] = mapped_column(Integer, default=0)
+    actions_succeeded: Mapped[int] = mapped_column(Integer, default=0)
+    actions_failed: Mapped[int] = mapped_column(Integer, default=0)
+    action_log: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    result: Mapped[str] = mapped_column(String(50), default="unknown")
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    account: Mapped[Account] = relationship(back_populates="warmup_logs")

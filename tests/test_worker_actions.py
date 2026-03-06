@@ -3,14 +3,20 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 import worker
-from worker import AccountCaptchaError, AccountSessionData, FacebookBrowser
+from models import CheckpointType
+from worker import (
+    AccountCaptchaError,
+    AccountInvalidCredentialsError,
+    AccountSessionData,
+    FacebookBrowser,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -201,6 +207,9 @@ class FakePage:
         comment_inputs: list[FakeLocator] | None = None,
         like_buttons: list[FakeLocator] | None = None,
         comments: list[FakeLocator] | None = None,
+        feed_locators: list[FakeLocator] | None = None,
+        profile_locators: list[FakeLocator] | None = None,
+        reels_videos: list[FakeLocator] | None = None,
         sort_buttons: list[FakeLocator] | None = None,
         sort_menuitems: list[FakeLocator] | None = None,
         login_form_count: int = 0,
@@ -208,6 +217,8 @@ class FakePage:
         url: str = "https://www.facebook.com/",
         goto_error: Exception | None = None,
         goto_result_url: str | None = None,
+        body_text: str = "",
+        selector_locators: dict[str, FakeLocator] | None = None,
     ) -> None:
         self.role_locators = list(role_locators or [])
         self.label_locators = list(label_locators or [])
@@ -215,13 +226,19 @@ class FakePage:
         self.comment_inputs = list(comment_inputs or [])
         self.like_buttons = list(like_buttons or [])
         self.comments = list(comments or [])
+        self.feed_locators = list(feed_locators or [])
+        self.profile_locators = list(profile_locators or [])
+        self.reels_videos = list(reels_videos or [])
         self.sort_buttons = list(sort_buttons or [])
         self.sort_menuitems = list(sort_menuitems or [])
         self.login_form_count = login_form_count
         self.dialog_count = dialog_count
         self.goto_error = goto_error
         self.goto_result_url = goto_result_url
+        self.body_text = body_text
+        self.selector_locators = dict(selector_locators or {})
         self.waits: list[float] = []
+        self.load_states: list[tuple[str, int | None]] = []
         self.goto_urls: list[str] = []
         self.keyboard = FakeKeyboard()
         self.scroll_calls: int = 0
@@ -230,6 +247,7 @@ class FakePage:
         self.mouse_clicks: list[tuple[float | None, float | None]] = []
         self.frames: list[Any] = []
         self.main_frame: Any = object()
+        self.screenshot_paths: list[str] = []
 
     async def goto(
         self,
@@ -246,6 +264,11 @@ class FakePage:
     async def wait_for_timeout(self, timeout_ms: float) -> None:
         self.waits.append(timeout_ms)
 
+    async def wait_for_load_state(
+        self, state: str = "load", timeout: int | None = None
+    ) -> None:
+        self.load_states.append((state, timeout))
+
     async def wheel(self, delta_x: int, delta_y: int) -> None:
         self.scroll_calls += 1
 
@@ -257,6 +280,18 @@ class FakePage:
 
     async def evaluate(self, script: str) -> None:
         self.scroll_calls += 1
+
+    async def inner_text(self, selector: str) -> str:
+        if selector == "body":
+            return self.body_text
+        return ""
+
+    async def content(self) -> str:
+        return self.body_text
+
+    async def screenshot(self, path: str, full_page: bool = False) -> None:
+        _ = full_page
+        self.screenshot_paths.append(path)
 
     def get_by_role(
         self, role: str, name: Any, exact: bool | None = None
@@ -271,6 +306,9 @@ class FakePage:
         return FakeLocator(click_error=RuntimeError("label locator not found"))
 
     def locator(self, selector: str) -> FakeLocator:
+        for pattern, locator in self.selector_locators.items():
+            if pattern in selector:
+                return locator
         if 'form[action*="login"]' in selector or "form[action*='login']" in selector:
             return FakeLocator(
                 all_items=[FakeLocator() for _ in range(self.login_form_count)],
@@ -292,6 +330,41 @@ class FakePage:
             or 'aria-label*="Комментарий"' in selector
         ):
             return FakeLocator(all_items=self.comments)
+        if (
+            'aria-label="Like"' in selector
+            or 'aria-label="Beğen"' in selector
+            or 'aria-label="Нравится"' in selector
+        ):
+            return FakeLocator(
+                all_items=self.like_buttons,
+                visible=bool(self.like_buttons),
+            )
+        if (
+            'aria-label="Comment"' in selector
+            or 'aria-label="Yorum Yap"' in selector
+            or 'aria-label="Комментировать"' in selector
+        ):
+            return FakeLocator(all_items=self.comments, visible=bool(self.comments))
+        if (
+            '[role="feed"]' in selector
+            or "div[data-pagelet=\"FeedUnit_0\"]" in selector
+            or "div[data-pagelet='FeedUnit_0']" in selector
+        ):
+            return FakeLocator(
+                all_items=self.feed_locators,
+                visible=bool(self.feed_locators),
+            )
+        if (
+            "ProfileTimeline" in selector
+            or "profile" in selector.lower()
+            or "cover" in selector.lower()
+        ):
+            return FakeLocator(
+                all_items=self.profile_locators,
+                visible=bool(self.profile_locators),
+            )
+        if "video" in selector:
+            return FakeLocator(all_items=self.reels_videos, visible=bool(self.reels_videos))
         if 'a[href*="' in selector or "a[href*='" in selector:
             return FakeLocator(visible=True)
         if (
@@ -334,11 +407,11 @@ def _create_browser_with_page(
             user_agent="Mozilla/5.0 test",
         )
     )
-    browser._page = page
+    browser._page = cast(Any, page)
     initial_cookies = (
         cookies_data if cookies_data is not None else [{"name": "c_user", "value": "1"}]
     )
-    browser._context = FakeContext(initial_cookies)
+    browser._context = cast(Any, FakeContext(initial_cookies))
     return browser
 
 
@@ -351,7 +424,7 @@ async def test_like_post_returns_true_when_like_clicked() -> None:
     result = await browser.like_post("https://example.com/post")
 
     assert result is True
-    assert page.mouse_clicks
+    assert like_button.click_calls == 1
 
 
 @pytest.mark.asyncio
@@ -512,12 +585,13 @@ async def test_like_comment_returns_true_when_like_clicked() -> None:
     )
 
     assert result is True
-    assert page.mouse_clicks
+    assert like_button.click_calls == 1
 
 
 @pytest.mark.asyncio
 async def test_like_comment_returns_true_when_dialog_like_button_is_found() -> None:
-    page = FakePage(like_buttons=[FakeLocator(text="Beğen")])
+    dialog_like = FakeLocator(text="Beğen")
+    page = FakePage(like_buttons=[dialog_like])
     browser = _create_browser_with_page(page)
 
     result = await browser.like_comment(
@@ -525,7 +599,7 @@ async def test_like_comment_returns_true_when_dialog_like_button_is_found() -> N
     )
 
     assert result is True
-    assert page.mouse_clicks
+    assert dialog_like.click_calls == 1
 
 
 @pytest.mark.asyncio
@@ -591,3 +665,239 @@ async def test_is_authorized_returns_false_when_login_wall_detected() -> None:
     result = await browser._is_authorized()
 
     assert result is False
+
+
+@pytest.mark.asyncio
+async def test_is_authorized_returns_false_for_saved_profile_login_wall() -> None:
+    page = FakePage(
+        body_text="Başka bir profil kullan Yeni hesap oluştur Devam",
+    )
+    browser = _create_browser_with_page(
+        page, cookies_data=[{"name": "c_user", "value": "1"}]
+    )
+
+    result = await browser._is_authorized()
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_check_session_alive_returns_false_for_saved_profile_login_wall() -> None:
+    page = FakePage(
+        body_text="Başka bir profil kullan Yeni hesap oluştur Devam",
+    )
+    browser = _create_browser_with_page(
+        page, cookies_data=[{"name": "c_user", "value": "1"}]
+    )
+
+    result = await browser._check_session_alive()
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_login_handles_saved_profile_password_modal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    continue_button = FakeLocator()
+    password_input = FakeLocator()
+    submit_button = FakeLocator()
+    login_form = FakeLocator(visible=False)
+    avatar = FakeLocator()
+    page = FakePage(
+        role_locators=[continue_button, submit_button],
+        selector_locators={
+            'input[name="email"]': FakeLocator(visible=False),
+            "input[type='password']": password_input,
+            'form[action*="login"]': login_form,
+            'img[alt][src*="scontent"]': avatar,
+        },
+        body_text="Devam",
+    )
+    browser = _create_browser_with_page(page, cookies_data=[])
+
+    auth_checks = iter([False, True])
+
+    async def _fake_is_authorized() -> bool:
+        return next(auth_checks)
+
+    async def _noop_raise_if_checkpoint(stage: str) -> None:
+        _ = stage
+        return None
+
+    monkeypatch.setattr(browser, "_is_authorized", _fake_is_authorized)
+    monkeypatch.setattr(browser, "_raise_if_checkpoint", _noop_raise_if_checkpoint)
+
+    await browser.login()
+
+    assert continue_button.click_calls == 1
+    assert "".join(page.keyboard.typed) == "demo_pass"
+
+
+@pytest.mark.asyncio
+async def test_login_does_not_treat_standard_login_page_as_saved_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    email_input = FakeLocator()
+    password_input = FakeLocator()
+    page = FakePage(
+        selector_locators={
+            'input[name="email"]': email_input,
+            "input[type='password']": password_input,
+            'input[name="pass"]': password_input,
+        },
+        body_text="Facebook'a Giriş Yap E-posta adresi veya cep telefonu numarası Şifre",
+    )
+    browser = _create_browser_with_page(page, cookies_data=[])
+
+    auth_checks = iter([False, True])
+
+    async def _fake_is_authorized() -> bool:
+        return next(auth_checks)
+
+    async def _noop_raise_if_checkpoint(stage: str) -> None:
+        _ = stage
+        return None
+
+    async def _noop_raise_if_invalid_credentials(stage: str) -> None:
+        _ = stage
+        return None
+
+    monkeypatch.setattr(browser, "_is_authorized", _fake_is_authorized)
+    monkeypatch.setattr(browser, "_raise_if_checkpoint", _noop_raise_if_checkpoint)
+    monkeypatch.setattr(
+        browser, "_raise_if_invalid_credentials", _noop_raise_if_invalid_credentials
+    )
+
+    await browser.login()
+
+    assert email_input.click_calls == 1
+    assert "".join(page.keyboard.typed) == "demo_userdemo_pass"
+
+
+@pytest.mark.asyncio
+async def test_login_raises_invalid_credentials_on_wrong_password_modal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    continue_button = FakeLocator()
+    password_input = FakeLocator()
+    avatar = FakeLocator()
+    page = FakePage(
+        role_locators=[continue_button],
+        selector_locators={
+            'input[name="email"]': FakeLocator(visible=False),
+            "input[type='password']": password_input,
+            'img[alt][src*="scontent"]': avatar,
+        },
+        body_text="Girdiğin şifre yanlış.",
+    )
+    browser = _create_browser_with_page(page, cookies_data=[])
+
+    async def _false_is_authorized() -> bool:
+        return False
+
+    async def _noop_raise_if_checkpoint(stage: str) -> None:
+        _ = stage
+        return None
+
+    monkeypatch.setattr(browser, "_is_authorized", _false_is_authorized)
+    monkeypatch.setattr(browser, "_raise_if_checkpoint", _noop_raise_if_checkpoint)
+
+    with pytest.raises(AccountInvalidCredentialsError, match="rejected login credentials"):
+        await browser.login()
+
+
+@pytest.mark.asyncio
+async def test_warmup_executes_actions_and_returns_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = FakePage()
+    browser = _create_browser_with_page(page)
+    calls: list[str] = []
+
+    async def _record(name: str) -> None:
+        calls.append(name)
+
+    monkeypatch.setattr(
+        browser,
+        "_warmup_scroll_feed",
+        lambda: _record("_warmup_scroll_feed"),
+    )
+    monkeypatch.setattr(
+        browser,
+        "_warmup_like_random_post",
+        lambda: _record("_warmup_like_random_post"),
+    )
+    monkeypatch.setattr(
+        browser,
+        "_warmup_open_comments",
+        lambda: _record("_warmup_open_comments"),
+    )
+    monkeypatch.setattr(
+        browser,
+        "_warmup_visit_profile",
+        lambda: _record("_warmup_visit_profile"),
+    )
+    monkeypatch.setattr(
+        browser,
+        "_warmup_watch_reels",
+        lambda: _record("_warmup_watch_reels"),
+    )
+    monkeypatch.setattr(worker.random, "choice", lambda seq: seq[0])
+    async def _alive() -> bool:
+        return True
+
+    monkeypatch.setattr(browser, "_check_session_alive", _alive)
+
+    result = await browser.warmup(duration_seconds=1)
+
+    assert result["result"] == "completed"
+    assert result["actions_attempted"] >= 1
+    assert result["actions_succeeded"] >= 1
+    assert result["actions_failed"] == 0
+    assert isinstance(result["action_log"], list)
+    assert calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("body_text", "expected"),
+    [
+        ("güvenlik kodu girin", CheckpointType.CODE_VERIFICATION),
+        ("kimliğini doğrula ve selfie yükle", CheckpointType.FACE_VERIFICATION),
+        ("olağandışı giriş tespit edildi", CheckpointType.SUSPICIOUS_LOGIN),
+        ("hesabın devre dışı bırakıldı", CheckpointType.ACCOUNT_DISABLED),
+        ("checkpoint page without known keywords", CheckpointType.UNKNOWN_CHECKPOINT),
+    ],
+)
+async def test_detect_checkpoint_type_classifies_page_text(
+    body_text: str, expected: CheckpointType
+) -> None:
+    page = FakePage(body_text=body_text, url="https://www.facebook.com/checkpoint/1")
+    browser = _create_browser_with_page(page)
+
+    detected = await browser.detect_checkpoint_type()
+
+    assert detected == expected
+
+
+@pytest.mark.asyncio
+async def test_detect_checkpoint_type_returns_unknown_on_read_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = FakePage(body_text="", url="https://www.facebook.com/checkpoint/1")
+    browser = _create_browser_with_page(page)
+
+    async def _broken_inner_text(selector: str) -> str:
+        _ = selector
+        raise RuntimeError("broken")
+
+    async def _broken_content() -> str:
+        raise RuntimeError("broken content")
+
+    monkeypatch.setattr(page, "inner_text", _broken_inner_text)
+    monkeypatch.setattr(page, "content", _broken_content)
+
+    detected = await browser.detect_checkpoint_type()
+
+    assert detected == CheckpointType.UNKNOWN_CHECKPOINT
