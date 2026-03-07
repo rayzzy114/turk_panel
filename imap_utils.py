@@ -7,6 +7,7 @@ from email.header import decode_header
 from typing import Optional
 
 LOGGER = logging.getLogger("imap_utils")
+_FACEBOOK_CODE_RE = re.compile(r"\b(\d{6,8})\b")
 
 # Default IMAP servers for popular domains
 IMAP_SERVERS = {
@@ -57,12 +58,83 @@ def _decode_payload_text(payload: object) -> str:
     return ""
 
 
+def _extract_facebook_codes_from_webmail_text(body_text: str) -> list[str]:
+    """Extracts visible Facebook verification codes from SnappyMail inbox text in display order."""
+    lines = [line.strip() for line in body_text.splitlines() if line.strip()]
+    codes: list[str] = []
+    for index, line in enumerate(lines):
+        if "facebook" not in line.lower():
+            continue
+        for candidate in lines[index : index + 4]:
+            match = _FACEBOOK_CODE_RE.search(candidate)
+            if match and match.group(1) not in codes:
+                codes.append(match.group(1))
+                break
+    if codes:
+        return codes
+    return list(dict.fromkeys(_FACEBOOK_CODE_RE.findall(body_text)))
+
+
+def _extract_latest_facebook_code_from_webmail_text(
+    body_text: str,
+    *,
+    ignore_codes: set[str] | None = None,
+) -> Optional[str]:
+    """Extracts the newest visible Facebook verification code from SnappyMail inbox text."""
+    ignored = ignore_codes or set()
+    for code in _extract_facebook_codes_from_webmail_text(body_text):
+        if code not in ignored:
+            return code
+    return None
+
+
+async def _get_facebook_code_from_webmail(
+    email_login: str,
+    email_password: str,
+    timeout_sec: int,
+    poll_interval_sec: int,
+    ignore_codes: set[str] | None = None,
+) -> Optional[str]:
+    """Fallback for providers like kh-mail that expose a usable webmail UI but broken IMAP."""
+    from camoufox.async_api import AsyncCamoufox
+
+    domain = email_login.split("@")[-1].lower()
+    webmail_url = f"http://{domain}/"
+    LOGGER.info("Trying webmail fallback for %s via %s", email_login, webmail_url)
+
+    deadline = asyncio.get_event_loop().time() + timeout_sec
+    async with AsyncCamoufox(headless=True, humanize=True, os=["windows", "macos"]) as browser:
+        page = await browser.new_page()
+        await page.goto(webmail_url, wait_until="domcontentloaded", timeout=120_000)
+        await page.locator('input[name="Email"]').fill(email_login)
+        password_input = page.locator('input[name="Password"]')
+        await password_input.fill(email_password)
+        await password_input.press("Enter")
+        await asyncio.sleep(8)
+
+        while asyncio.get_event_loop().time() < deadline:
+            body_text = await page.inner_text("body")
+            code = _extract_latest_facebook_code_from_webmail_text(
+                body_text or "",
+                ignore_codes=ignore_codes,
+            )
+            if code:
+                LOGGER.info("Found Facebook code via webmail fallback: %s", code)
+                return code
+            await page.reload(wait_until="domcontentloaded", timeout=120_000)
+            await asyncio.sleep(poll_interval_sec)
+
+    LOGGER.warning("Timeout waiting for Facebook code in webmail for %s", email_login)
+    return None
+
+
 async def get_facebook_code(
     email_login: str,
     email_password: str,
     imap_server: Optional[str] = None,
     timeout_sec: int = 120,
     poll_interval_sec: int = 10,
+    ignore_codes: set[str] | None = None,
 ) -> Optional[str]:
     """
     Connects to IMAP server and waits for an email from Facebook with a verification code.
@@ -71,23 +143,53 @@ async def get_facebook_code(
     if not imap_server:
         imap_server = guess_imap_server(email_login)
 
-    LOGGER.info(f"Looking for Facebook code for {email_login} via {imap_server}...")
+    domain = email_login.split("@")[-1].lower()
+    candidate_servers: list[str] = []
+    for candidate in (imap_server, domain):
+        if candidate and candidate not in candidate_servers:
+            candidate_servers.append(candidate)
+
+    LOGGER.info(
+        "Looking for Facebook code for %s via %s...",
+        email_login,
+        ", ".join(candidate_servers),
+    )
 
     start_time = asyncio.get_event_loop().time()
 
     while (asyncio.get_event_loop().time() - start_time) < timeout_sec:
-        try:
-            # Run blocking IMAP operations in an executor
-            code = await asyncio.to_thread(
-                _check_inbox_sync, email_login, email_password, imap_server
+        for candidate_server in candidate_servers:
+            try:
+                code = await asyncio.to_thread(
+                    _check_inbox_sync,
+                    email_login,
+                    email_password,
+                    candidate_server,
+                    ignore_codes,
+                )
+                if code:
+                    LOGGER.info("Found Facebook code: %s", code)
+                    return code
+
+            except Exception as e:
+                LOGGER.error(
+                    "IMAP error for %s via %s: %s",
+                    email_login,
+                    candidate_server,
+                    str(e),
+                )
+                # Don't break immediately on error, might be a temporary network issue
+
+        if domain == "kh-mail.com":
+            code = await _get_facebook_code_from_webmail(
+                email_login=email_login,
+                email_password=email_password,
+                timeout_sec=timeout_sec,
+                poll_interval_sec=poll_interval_sec,
+                ignore_codes=ignore_codes,
             )
             if code:
-                LOGGER.info(f"Found Facebook code: {code}")
                 return code
-
-        except Exception as e:
-            LOGGER.error(f"IMAP error for {email_login}: {str(e)}")
-            # Don't break immediately on error, might be a temporary network issue
 
         await asyncio.sleep(poll_interval_sec)
 
@@ -96,9 +198,13 @@ async def get_facebook_code(
 
 
 def _check_inbox_sync(
-    email_login: str, email_password: str, imap_server: str
+    email_login: str,
+    email_password: str,
+    imap_server: str,
+    ignore_codes: set[str] | None = None,
 ) -> Optional[str]:
     """Blocking function to check inbox for Facebook verification code."""
+    ignored = ignore_codes or set()
     try:
         # Connect to server
         mail = imaplib.IMAP4_SSL(imap_server)
@@ -137,7 +243,7 @@ def _check_inbox_sync(
 
                     # Regex for 6-8 digit code in subject
                     code_match = re.search(r"\b(\d{6,8})\b", subject)
-                    if code_match:
+                    if code_match and code_match.group(1) not in ignored:
                         mail.logout()
                         return code_match.group(1)
 
@@ -148,14 +254,14 @@ def _check_inbox_sync(
                                 payload = part.get_payload(decode=True)
                                 body = _decode_payload_text(payload)
                                 code_match = re.search(r"\b(\d{6,8})\b", body)
-                                if code_match:
+                                if code_match and code_match.group(1) not in ignored:
                                     mail.logout()
                                     return code_match.group(1)
                     else:
                         payload = msg.get_payload(decode=True)
                         body = _decode_payload_text(payload)
                         code_match = re.search(r"\b(\d{6,8})\b", body)
-                        if code_match:
+                        if code_match and code_match.group(1) not in ignored:
                             mail.logout()
                             return code_match.group(1)
 

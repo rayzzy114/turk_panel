@@ -100,7 +100,8 @@ class FacebookBrowser:
         "LIKE": re.compile(r"\b(Нравится|Like|Beğen)\b", re.IGNORECASE),
     }
     CHECKPOINT_URL_RE: Final[re.Pattern[str]] = re.compile(
-        r"/checkpoint/?", re.IGNORECASE
+        r"/(?:checkpoint|two_step_verification(?:/authentication)?|auth_platform/codesubmit)/?",
+        re.IGNORECASE,
     )
     WARMUP_ACTION_LABELS: Final[dict[str, str]] = {
         "_warmup_scroll_feed": "Прокрутка ленты",
@@ -317,6 +318,29 @@ class FacebookBrowser:
             if random.random() < 0.05:
                 delay += random.uniform(0.5, 1.5)
             await asyncio.sleep(delay)
+
+    async def _type_and_verify(self, locator: Any, text: str) -> None:
+        """Types into an input and verifies the DOM value, falling back to fill() on mismatch."""
+        target = locator.first
+        await target.click()
+        try:
+            await target.fill("")
+        except Exception:
+            pass
+        await self._human_type(text)
+        try:
+            current_value = await target.evaluate("el => el.value || ''")
+        except Exception:
+            return
+        if current_value == text:
+            return
+        self.logger.warning(
+            "Input mismatch for %s: expected %r, got %r. Falling back to fill().",
+            self.account.login,
+            text,
+            current_value,
+        )
+        await target.fill(text)
 
     async def _human_scroll(self, distance: int = 400, *, times: int | None = None) -> None:
         """Human-like scrolling via randomized step batches and pauses."""
@@ -610,33 +634,20 @@ class FacebookBrowser:
 
         # Человеческий ввод логина
         email_field = await self._find_login_identifier_field()
-        await email_field.click()
-        await self._human_type(self.account.login)
+        await self._type_and_verify(email_field, self.account.login)
 
         await asyncio.sleep(random.uniform(1.5, 3.5))
 
         # Человеческий ввод пароля
         pass_field = self.page.locator('input[name="pass"]')
-        await pass_field.click()
-        await self._human_type(self.account.password)
+        await self._type_and_verify(pass_field, self.account.password)
 
         await asyncio.sleep(random.uniform(1.0, 2.5))
         await self.page.keyboard.press("Enter")
-
-        await asyncio.sleep(random.uniform(10, 20))
-        await self._raise_if_checkpoint("login")
-
-        # Проверка на капчу/ошибку
-        if await self.page.locator('form[action*="login"]').count() > 0:
-            await self._log("ВНИМАНИЕ: Facebook требует проверку (капча/пароль).")
-            raise AccountCaptchaError("Checkpoint detected during login.")
-
-        if not await self._is_authorized():
-            await self._raise_if_invalid_credentials("login")
-            raise AccountCaptchaError(
-                "Не удалось авторизоваться после ввода логина/пароля."
-            )
-
+        await self._wait_for_login_outcome(
+            stage="login",
+            failure_message="Не удалось авторизоваться после ввода логина/пароля.",
+        )
         await self._log("Успешный вход по логину и паролю.")
 
     async def _find_login_identifier_field(self) -> Any:
@@ -738,8 +749,7 @@ class FacebookBrowser:
             return False
 
         await self._log("Facebook запрашивает только пароль сохраненного профиля.")
-        await password_field.click()
-        await self._human_type(self.account.password)
+        await self._type_and_verify(password_field, self.account.password)
         await asyncio.sleep(random.uniform(1.0, 2.5))
 
         submit_button = await _find_named_action(
@@ -750,22 +760,35 @@ class FacebookBrowser:
         else:
             await self.page.keyboard.press("Enter")
 
-        await asyncio.sleep(random.uniform(10, 20))
-        await self._raise_if_checkpoint("login")
-        await self._raise_if_invalid_credentials("saved profile login")
-
-        if await self.page.locator('form[action*="login"]').count() > 0:
-            await self._log("ВНИМАНИЕ: Facebook требует проверку (капча/пароль).")
-            raise AccountCaptchaError("Checkpoint detected during login.")
-
-        if not await self._is_authorized():
-            await self._raise_if_invalid_credentials("saved profile login")
-            raise AccountCaptchaError(
+        await self._wait_for_login_outcome(
+            stage="saved profile login",
+            failure_message=(
                 "Не удалось авторизоваться после ввода пароля сохраненного профиля."
-            )
-
+            ),
+        )
         await self._log("Успешный вход через сохраненный профиль.")
         return True
+
+    async def _wait_for_login_outcome(
+        self,
+        *,
+        stage: str,
+        failure_message: str,
+        timeout_seconds: int = 45,
+        poll_seconds: int = 3,
+    ) -> None:
+        """Waits for the login submit to settle into success, checkpoint, or explicit failure."""
+        deadline = perf_counter() + timeout_seconds
+        while perf_counter() < deadline:
+            await self._raise_if_checkpoint(stage)
+            await self._raise_if_invalid_credentials(stage)
+            if await self._is_authorized():
+                return
+            await asyncio.sleep(poll_seconds)
+
+        await self._raise_if_checkpoint(stage)
+        await self._raise_if_invalid_credentials(stage)
+        raise AccountCaptchaError(failure_message)
 
     async def _raise_if_invalid_credentials(self, stage: str) -> None:
         """Raises when Facebook explicitly reports wrong password/invalid credentials."""
@@ -1172,8 +1195,11 @@ class FacebookBrowser:
 
     async def _is_authorized(self) -> bool:
         try:
+            current_url = self.page.url or ""
+            if self.CHECKPOINT_URL_RE.search(current_url):
+                return False
             # Не переходим на главную если мы уже там
-            if self.page.url != self.BASE_URL:
+            if current_url != self.BASE_URL:
                 await self.page.goto(self.BASE_URL, wait_until="domcontentloaded")
             if self.CHECKPOINT_URL_RE.search(self.page.url or ""):
                 return False
@@ -1322,6 +1348,10 @@ class FacebookBrowser:
 
         Returns UNKNOWN_CHECKPOINT on any parsing failure.
         """
+        current_url = (self.page.url or "").lower()
+        if "auth_platform/codesubmit" in current_url:
+            return CheckpointType.CODE_VERIFICATION
+
         try:
             body_text = await self.page.inner_text("body")
         except Exception:
@@ -1350,8 +1380,13 @@ class FacebookBrowser:
                     "güvenlik kodu",
                     "doğrulama kodu",
                     "onay kodu",
+                    "e-posta adresini kontrol et",
+                    "gönderdiğimiz kodu gir",
+                    "kodu gir",
                     "security code",
                     "confirmation code",
+                    "check your email address",
+                    "enter the code we sent",
                 ),
             ),
             (
@@ -1371,8 +1406,14 @@ class FacebookBrowser:
                 (
                     "olağandışı giriş",
                     "başka birinin hesabına",
+                    "hesabın sana ait olduğunu onayla",
+                    "kilidini açmak için",
+                    "giriş detaylarını gözden geçir",
                     "unusual login",
                     "someone else",
+                    "confirm this account is yours",
+                    "we locked your account",
+                    "review the login details",
                 ),
             ),
             (
@@ -1424,45 +1465,135 @@ class FacebookBrowser:
             "Обнаружен CHECKPOINT. Пробуем автоматическое подтверждение по почте..."
         )
 
-        try:
-            send_code_btn = self.page.get_by_text(
-                re.compile(r"Отправить код по|Send code to|Kodu gönder", re.IGNORECASE)
-            )
-            if await send_code_btn.count() > 0:
-                await self._log("Выбираем отправку кода на email")
-                await self._human_click(send_code_btn.first)
+        async def _click_named_action(pattern: re.Pattern[str]) -> bool:
+            locator_factories = [
+                lambda: self.page.get_by_text(pattern).first,
+                lambda: self.page.get_by_role("link", name=pattern).first,
+                lambda: self.page.get_by_role("button", name=pattern).first,
+                lambda: self.page.locator("a, button, [role='link'], [role='button']").filter(
+                    has_text=pattern
+                ).first,
+            ]
+            for factory in locator_factories:
+                try:
+                    locator = factory()
+                    if await locator.count() == 0 or not await locator.is_visible(timeout=1500):
+                        continue
+                    try:
+                        await self._human_click(locator)
+                    except Exception:
+                        await locator.click(force=True)
+                    return True
+                except Exception:
+                    continue
+            return False
 
-                next_btn = self.page.get_by_text(
+        async def _has_invalid_code_error() -> bool:
+            try:
+                body_text = (await self.page.inner_text("body") or "").lower()
+            except Exception:
+                try:
+                    body_text = (await self.page.content() or "").lower()
+                except Exception:
+                    return False
+            invalid_code_patterns = [
+                "bu kod çalışmıyor",
+                "bu kod calismiyor",
+                "doğru olduğundan emin ol",
+                "dogru oldugundan emin ol",
+                "invalid code",
+                "incorrect code",
+                "this code doesn't work",
+                "this code does not work",
+            ]
+            return any(pattern in body_text for pattern in invalid_code_patterns)
+
+        code_input_selectors = [
+            "input[name='captcha_response']",
+            'input[name="captcha_response"]',
+            "input[name='code']",
+            'input[name="code"]',
+            "input[name='email']",
+            'input[name="email"]',
+            'input[placeholder*="Kod"]',
+            'input[placeholder*="code"]',
+            "input[inputmode='numeric']",
+            'input[autocomplete="one-time-code"]',
+        ]
+
+        try:
+            if await _click_named_action(
+                re.compile(r"Отправить код по|Send code to|Kodu gönder", re.IGNORECASE)
+            ):
+                await self._log("Выбираем отправку кода на email")
+                if await _click_named_action(
                     re.compile(r"Далее|Next|Devam", re.IGNORECASE)
-                )
-                if await next_btn.count() > 0:
-                    await self._human_click(next_btn.first)
+                ):
                     await self.page.wait_for_load_state("networkidle")
 
-            code_input = self.page.locator(
-                "input[name='captcha_response'], input[name='code']"
-            )
+            code_input = None
+            for _ in range(3):
+                for selector in code_input_selectors:
+                    candidate = self.page.locator(selector).first
+                    if await candidate.count() > 0 and await candidate.is_visible(timeout=1500):
+                        code_input = candidate
+                        break
+                if code_input is not None:
+                    break
+                advanced = await _click_named_action(
+                    re.compile(r"Başla|Start|Continue|Devam|Next|İleri", re.IGNORECASE)
+                )
+                if not advanced:
+                    break
+                await asyncio.sleep(3)
+
             if (
-                await code_input.count() > 0
+                code_input is not None
                 and self.account.email_login
                 and self.account.email_password
             ):
-                await self._log(
-                    f"Ждем письмо от Facebook на {self.account.email_login}..."
+                used_codes: set[str] = set()
+                resend_patterns = re.compile(
+                    r"Новый код|New code|Resend|Yeni bir kod al",
+                    re.IGNORECASE,
                 )
+                for attempt in range(1, 4):
+                    if await _click_named_action(resend_patterns):
+                        await self._log("Запрашиваю новый код подтверждения...")
+                        await asyncio.sleep(8)
 
-                code = await get_facebook_code(
-                    email_login=self.account.email_login,
-                    email_password=self.account.email_password,
-                    imap_server=self.account.imap_server,
-                    timeout_sec=120,
-                    poll_interval_sec=10,
-                )
+                    await self._log(
+                        f"Ждем письмо от Facebook на {self.account.email_login}..."
+                    )
+                    code = await get_facebook_code(
+                        email_login=self.account.email_login,
+                        email_password=self.account.email_password,
+                        imap_server=self.account.imap_server,
+                        timeout_sec=120,
+                        poll_interval_sec=10,
+                        ignore_codes=used_codes,
+                    )
 
-                if code:
+                    if not code:
+                        await self._log("Код не пришел на почту.")
+                        continue
+
                     await self._log(f"Получен код подтверждения: {code}")
-                    await code_input.first.focus()
-                    await self._human_type(code)
+                    await code_input.focus()
+                    await self._type_and_verify(code_input, code)
+                    await asyncio.sleep(1)
+                    await self.page.keyboard.press("Enter")
+                    await asyncio.sleep(5)
+                    if not self.CHECKPOINT_URL_RE.search(self.page.url or ""):
+                        await self._log("Чекпоинт успешно пройден!")
+                        return True
+
+                    if await _has_invalid_code_error():
+                        used_codes.add(code)
+                        await self._log(
+                            f"Facebook отклонил код подтверждения (попытка {attempt}/3)."
+                        )
+                        continue
 
                     submit_btn = self.page.get_by_text(
                         re.compile(
@@ -1477,9 +1608,7 @@ class FacebookBrowser:
                         if not self.CHECKPOINT_URL_RE.search(self.page.url or ""):
                             await self._log("Чекпоинт успешно пройден!")
                             return True
-                else:
-                    await self._log("Код не пришел на почту.")
-            elif await code_input.count() > 0:
+            elif code_input is not None:
                 await self._log(
                     f"Требуется код подтверждения, но данные от почты не указаны: {self.account.login}"
                 )

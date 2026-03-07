@@ -13,6 +13,7 @@ import worker
 from models import CheckpointType
 from worker import (
     AccountCaptchaError,
+    AccountCheckpointError,
     AccountInvalidCredentialsError,
     AccountSessionData,
     FacebookBrowser,
@@ -34,6 +35,7 @@ class FakeLocator:
     click_error: Exception | None = None
     href: str | None = None
     text: str = ""
+    value: str = ""
     visible: bool = True
     all_items: list["FakeLocator"] = field(default_factory=list)
     author_locator: "FakeLocator | None" = None
@@ -46,10 +48,12 @@ class FakeLocator:
     wait_states: list[str] = field(default_factory=list)
     evaluate_calls: list[str] = field(default_factory=list)
     evaluate_return_by_substring: dict[str, Any] = field(default_factory=dict)
+    filled_values: list[str] = field(default_factory=list)
     box: dict[str, float] | None = field(
         default_factory=lambda: {"x": 10.0, "y": 10.0, "width": 100.0, "height": 20.0}
     )
     scroll_calls: int = 0
+    focus_calls: int = 0
 
     @property
     def first(self) -> "FakeLocator":
@@ -66,8 +70,16 @@ class FakeLocator:
 
     async def type(self, value: str, delay: int | None = None) -> None:
         self.typed_chars.append(value)
+        self.value += value
         if delay is not None:
             self.type_delays.append(delay)
+
+    async def fill(self, value: str) -> None:
+        self.filled_values.append(value)
+        self.value = value
+
+    async def focus(self) -> None:
+        self.focus_calls += 1
 
     async def get_attribute(self, name: str) -> str | None:
         if name == "href":
@@ -94,6 +106,8 @@ class FakeLocator:
         for key, value in self.evaluate_return_by_substring.items():
             if key in script:
                 return value
+        if "el.value" in script:
+            return self.value
         return None
 
     async def scroll_into_view_if_needed(self, timeout: int | None = None) -> None:
@@ -203,6 +217,7 @@ class FakePage:
         *,
         role_locators: list[FakeLocator] | None = None,
         label_locators: list[FakeLocator] | None = None,
+        text_locators: list[FakeLocator] | None = None,
         articles: list[FakeLocator] | None = None,
         comment_inputs: list[FakeLocator] | None = None,
         like_buttons: list[FakeLocator] | None = None,
@@ -222,6 +237,7 @@ class FakePage:
     ) -> None:
         self.role_locators = list(role_locators or [])
         self.label_locators = list(label_locators or [])
+        self.text_locators = list(text_locators or [])
         self.articles = list(articles or [])
         self.comment_inputs = list(comment_inputs or [])
         self.like_buttons = list(like_buttons or [])
@@ -304,6 +320,11 @@ class FakePage:
         if self.label_locators:
             return self.label_locators.pop(0)
         return FakeLocator(click_error=RuntimeError("label locator not found"))
+
+    def get_by_text(self, text: Any) -> FakeLocator:
+        if self.text_locators:
+            return self.text_locators.pop(0)
+        return FakeLocator(click_error=RuntimeError("text locator not found"))
 
     def locator(self, selector: str) -> FakeLocator:
         for pattern, locator in self.selector_locators.items():
@@ -696,6 +717,22 @@ async def test_check_session_alive_returns_false_for_saved_profile_login_wall() 
 
 
 @pytest.mark.asyncio
+async def test_is_authorized_returns_false_for_two_step_verification_without_redirect() -> None:
+    page = FakePage(
+        url="https://www.facebook.com/two_step_verification/authentication/?flow=pre_authentication",
+        body_text="Ben robot değilim",
+    )
+    browser = _create_browser_with_page(
+        page, cookies_data=[{"name": "c_user", "value": "1"}]
+    )
+
+    result = await browser._is_authorized()
+
+    assert result is False
+    assert page.goto_urls == []
+
+
+@pytest.mark.asyncio
 async def test_login_handles_saved_profile_password_modal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -817,6 +854,89 @@ async def test_login_uses_placeholder_identifier_field_on_standard_login_page(
 
 
 @pytest.mark.asyncio
+async def test_login_waits_for_delayed_authorization_after_submit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    email_input = FakeLocator()
+    password_input = FakeLocator()
+    page = FakePage(
+        selector_locators={
+            'input[name="email"]': email_input,
+            "input[type='password']": password_input,
+            'input[name="pass"]': password_input,
+        },
+        body_text="Facebook Login",
+    )
+    browser = _create_browser_with_page(page, cookies_data=[])
+
+    auth_checks = iter([False, False, False, True])
+
+    async def _fake_is_authorized() -> bool:
+        return next(auth_checks)
+
+    async def _noop_raise_if_checkpoint(stage: str) -> None:
+        _ = stage
+        return None
+
+    async def _noop_raise_if_invalid_credentials(stage: str) -> None:
+        _ = stage
+        return None
+
+    monkeypatch.setattr(browser, "_is_authorized", _fake_is_authorized)
+    monkeypatch.setattr(browser, "_raise_if_checkpoint", _noop_raise_if_checkpoint)
+    monkeypatch.setattr(
+        browser, "_raise_if_invalid_credentials", _noop_raise_if_invalid_credentials
+    )
+
+    await browser.login()
+
+    assert email_input.click_calls == 1
+    assert page.keyboard.pressed[-1] == "Enter"
+    assert "".join(page.keyboard.typed) == "demo_userdemo_pass"
+
+
+@pytest.mark.asyncio
+async def test_login_falls_back_to_fill_when_input_value_mismatches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    email_input = FakeLocator(evaluate_return_by_substring={"el.value": "demo_use"})
+    password_input = FakeLocator(evaluate_return_by_substring={"el.value": "demo_pas"})
+    page = FakePage(
+        selector_locators={
+            'input[name="email"]': email_input,
+            "input[type='password']": password_input,
+            'input[name="pass"]': password_input,
+        },
+        body_text="Facebook Login",
+    )
+    browser = _create_browser_with_page(page, cookies_data=[])
+
+    auth_checks = iter([False, True])
+
+    async def _fake_is_authorized() -> bool:
+        return next(auth_checks)
+
+    async def _noop_raise_if_checkpoint(stage: str) -> None:
+        _ = stage
+        return None
+
+    async def _noop_raise_if_invalid_credentials(stage: str) -> None:
+        _ = stage
+        return None
+
+    monkeypatch.setattr(browser, "_is_authorized", _fake_is_authorized)
+    monkeypatch.setattr(browser, "_raise_if_checkpoint", _noop_raise_if_checkpoint)
+    monkeypatch.setattr(
+        browser, "_raise_if_invalid_credentials", _noop_raise_if_invalid_credentials
+    )
+
+    await browser.login()
+
+    assert email_input.filled_values[-1] == "demo_user"
+    assert password_input.filled_values[-1] == "demo_pass"
+
+
+@pytest.mark.asyncio
 async def test_login_raises_invalid_credentials_on_wrong_password_modal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -905,8 +1025,10 @@ async def test_warmup_executes_actions_and_returns_metrics(
     ("body_text", "expected"),
     [
         ("güvenlik kodu girin", CheckpointType.CODE_VERIFICATION),
+        ("E-posta adresini kontrol et ve gönderdiğimiz kodu gir", CheckpointType.CODE_VERIFICATION),
         ("kimliğini doğrula ve selfie yükle", CheckpointType.FACE_VERIFICATION),
         ("olağandışı giriş tespit edildi", CheckpointType.SUSPICIOUS_LOGIN),
+        ("hesabın sana ait olduğunu onayla ve giriş detaylarını gözden geçir", CheckpointType.SUSPICIOUS_LOGIN),
         ("hesabın devre dışı bırakıldı", CheckpointType.ACCOUNT_DISABLED),
         ("checkpoint page without known keywords", CheckpointType.UNKNOWN_CHECKPOINT),
     ],
@@ -942,3 +1064,280 @@ async def test_detect_checkpoint_type_returns_unknown_on_read_error(
     detected = await browser.detect_checkpoint_type()
 
     assert detected == CheckpointType.UNKNOWN_CHECKPOINT
+
+
+@pytest.mark.asyncio
+async def test_detect_checkpoint_type_uses_codesubmit_url_when_body_is_unreadable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = FakePage(
+        body_text="",
+        url="https://www.facebook.com/auth_platform/codesubmit/?foo=1",
+    )
+    browser = _create_browser_with_page(page)
+
+    async def _broken_inner_text(selector: str) -> str:
+        _ = selector
+        raise RuntimeError("broken")
+
+    async def _broken_content() -> str:
+        raise RuntimeError("broken content")
+
+    monkeypatch.setattr(page, "inner_text", _broken_inner_text)
+    monkeypatch.setattr(page, "content", _broken_content)
+
+    detected = await browser.detect_checkpoint_type()
+
+    assert detected == CheckpointType.CODE_VERIFICATION
+
+
+@pytest.mark.asyncio
+async def test_raise_if_checkpoint_detects_two_step_verification_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = FakePage(
+        url=(
+            "https://www.facebook.com/two_step_verification/authentication/"
+            "?encrypted_context=abc&flow=pre_authentication"
+        ),
+        body_text="Ben robot değilim",
+    )
+    browser = _create_browser_with_page(page)
+
+    async def _unresolved() -> bool:
+        return False
+
+    monkeypatch.setattr(browser, "_wait_for_checkpoint_resolution", _unresolved)
+
+    with pytest.raises(AccountCheckpointError, match="two_step_verification"):
+        await browser._raise_if_checkpoint("login")
+
+
+@pytest.mark.asyncio
+async def test_handle_code_checkpoint_submits_email_code_from_mailbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    code_input = FakeLocator()
+    submit_button = FakeLocator()
+    page = FakePage(
+        text_locators=[FakeLocator(visible=False), submit_button],
+        selector_locators={
+            "input[name='captcha_response']": FakeLocator(visible=False),
+            'input[name="captcha_response"]': FakeLocator(visible=False),
+            "input[name='code']": FakeLocator(visible=False),
+            'input[name="code"]': FakeLocator(visible=False),
+            "input[name='email']": code_input,
+            'input[name="email"]': code_input,
+        },
+        url="https://www.facebook.com/auth_platform/codesubmit/?foo=1",
+        body_text="E-posta adresini kontrol et Kod Devam",
+    )
+    browser = _create_browser_with_page(page)
+    browser.account.email_login = "mail@example.com"
+    browser.account.email_password = "secret"
+    browser.account.imap_server = "kh-mail.com"
+
+    async def _fake_get_facebook_code(**_: Any) -> str | None:
+        return "123456"
+
+    async def _fake_wait_for_load_state(
+        state: str = "load", timeout: int | None = None
+    ) -> None:
+        page.load_states.append((state, timeout))
+        page.url = "https://www.facebook.com/"
+
+    monkeypatch.setattr(worker, "get_facebook_code", _fake_get_facebook_code)
+    monkeypatch.setattr(page, "wait_for_load_state", _fake_wait_for_load_state)
+
+    result = await browser._handle_code_checkpoint()
+
+    assert result is True
+    assert code_input.focus_calls == 1
+    assert "".join(page.keyboard.typed) == "123456"
+    assert submit_button.click_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_handle_code_checkpoint_requests_fresh_code_and_submits_with_enter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    code_input = FakeLocator()
+    resend_button = FakeLocator()
+    page = FakePage(
+        text_locators=[FakeLocator(visible=False), resend_button],
+        selector_locators={
+            "input[name='captcha_response']": FakeLocator(visible=False),
+            'input[name="captcha_response"]': FakeLocator(visible=False),
+            "input[name='code']": FakeLocator(visible=False),
+            'input[name="code"]': FakeLocator(visible=False),
+            "input[name='email']": code_input,
+            'input[name="email"]': code_input,
+        },
+        url="https://www.facebook.com/auth_platform/codesubmit/?foo=1",
+        body_text="E-posta adresini kontrol et Yeni bir kod al Devam",
+    )
+    browser = _create_browser_with_page(page)
+    browser.account.email_login = "mail@example.com"
+    browser.account.email_password = "secret"
+
+    async def _fake_get_facebook_code(**_: Any) -> str | None:
+        return "654321"
+
+    original_press = page.keyboard.press
+
+    async def _press_and_authorize(key: str) -> None:
+        await original_press(key)
+        if key == "Enter":
+            page.url = "https://www.facebook.com/"
+
+    monkeypatch.setattr(worker, "get_facebook_code", _fake_get_facebook_code)
+    monkeypatch.setattr(page.keyboard, "press", _press_and_authorize)
+
+    result = await browser._handle_code_checkpoint()
+
+    assert result is True
+    assert resend_button.click_calls == 1
+    assert "Enter" in page.keyboard.pressed
+
+
+@pytest.mark.asyncio
+async def test_handle_code_checkpoint_uses_placeholder_code_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    code_input = FakeLocator()
+    page = FakePage(
+        text_locators=[FakeLocator(visible=False) for _ in range(8)],
+        selector_locators={
+            "input[name='captcha_response']": FakeLocator(visible=False),
+            'input[name="captcha_response"]': FakeLocator(visible=False),
+            "input[name='code']": FakeLocator(visible=False),
+            'input[name="code"]': FakeLocator(visible=False),
+            "input[name='email']": FakeLocator(visible=False),
+            'input[name="email"]': FakeLocator(visible=False),
+            'input[placeholder*="Kod"]': code_input,
+        },
+        url="https://www.facebook.com/auth_platform/codesubmit/?foo=1",
+        body_text="E-posta adresini kontrol et Yeni bir kod al Devam",
+    )
+    browser = _create_browser_with_page(page)
+    browser.account.email_login = "mail@example.com"
+    browser.account.email_password = "secret"
+
+    async def _fake_get_facebook_code(**_: Any) -> str | None:
+        return "654321"
+
+    original_press = page.keyboard.press
+
+    async def _press_and_authorize(key: str) -> None:
+        await original_press(key)
+        if key == "Enter":
+            page.url = "https://www.facebook.com/"
+
+    monkeypatch.setattr(worker, "get_facebook_code", _fake_get_facebook_code)
+    monkeypatch.setattr(page.keyboard, "press", _press_and_authorize)
+
+    result = await browser._handle_code_checkpoint()
+
+    assert result is True
+    assert code_input.focus_calls == 1
+    assert "Enter" in page.keyboard.pressed
+
+
+@pytest.mark.asyncio
+async def test_handle_code_checkpoint_retries_after_invalid_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    code_input = FakeLocator()
+    resend_button = FakeLocator(text="Yeni bir kod al")
+    page = FakePage(
+        text_locators=[FakeLocator(visible=False), resend_button, resend_button],
+        selector_locators={
+            "input[name='captcha_response']": FakeLocator(visible=False),
+            'input[name="captcha_response"]': FakeLocator(visible=False),
+            "input[name='code']": FakeLocator(visible=False),
+            'input[name="code"]': FakeLocator(visible=False),
+            "input[name='email']": code_input,
+            'input[name="email"]': code_input,
+        },
+        url="https://www.facebook.com/auth_platform/codesubmit/?foo=1",
+        body_text="E-posta adresini kontrol et Yeni bir kod al Devam",
+    )
+    browser = _create_browser_with_page(page)
+    browser.account.email_login = "mail@example.com"
+    browser.account.email_password = "secret"
+
+    requested_ignore_sets: list[set[str]] = []
+    codes = iter(["111111", "222222"])
+
+    async def _fake_get_facebook_code(**kwargs: Any) -> str | None:
+        requested_ignore_sets.append(set(kwargs.get("ignore_codes") or set()))
+        return next(codes)
+
+    submit_attempts = 0
+    original_press = page.keyboard.press
+
+    async def _press_with_invalid_then_success(key: str) -> None:
+        nonlocal submit_attempts
+        await original_press(key)
+        if key != "Enter":
+            return
+        submit_attempts += 1
+        if submit_attempts == 1:
+            page.body_text = "Bu kod çalışmıyor. Yeni bir kod al"
+        else:
+            page.url = "https://www.facebook.com/"
+            page.body_text = "Facebook home"
+
+    monkeypatch.setattr(worker, "get_facebook_code", _fake_get_facebook_code)
+    monkeypatch.setattr(page.keyboard, "press", _press_with_invalid_then_success)
+
+    result = await browser._handle_code_checkpoint()
+
+    assert result is True
+    assert requested_ignore_sets == [set(), {"111111"}]
+    assert page.keyboard.pressed.count("Enter") >= 2
+
+
+@pytest.mark.asyncio
+async def test_handle_code_checkpoint_clicks_locked_account_intro_before_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    code_input = FakeLocator(visible=False)
+    start_button = FakeLocator(text="Başla")
+    page = FakePage(
+        text_locators=[FakeLocator(visible=False), start_button],
+        selector_locators={
+            "input[name='captcha_response']": FakeLocator(visible=False),
+            'input[name="captcha_response"]': FakeLocator(visible=False),
+            "input[name='code']": code_input,
+            'input[name="code"]': code_input,
+        },
+        url="https://www.facebook.com/checkpoint/828281030927956/",
+        body_text="hesabın sana ait olduğunu onayla Başla",
+    )
+    browser = _create_browser_with_page(page)
+    browser.account.email_login = "mail@example.com"
+    browser.account.email_password = "secret"
+
+    async def _fake_get_facebook_code(**_: Any) -> str | None:
+        return "654321"
+
+    async def _fake_human_click(locator: Any, **_: Any) -> None:
+        _ = locator
+        code_input.visible = True
+
+    original_press = page.keyboard.press
+
+    async def _press_and_authorize(key: str) -> None:
+        await original_press(key)
+        if key == "Enter":
+            page.url = "https://www.facebook.com/"
+
+    monkeypatch.setattr(worker, "get_facebook_code", _fake_get_facebook_code)
+    monkeypatch.setattr(browser, "_human_click", _fake_human_click)
+    monkeypatch.setattr(page.keyboard, "press", _press_and_authorize)
+
+    result = await browser._handle_code_checkpoint()
+
+    assert result is True
+    assert code_input.focus_calls == 1

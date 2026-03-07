@@ -1,12 +1,12 @@
 # Session Context
 
-Last updated: 2026-03-06
+Last updated: 2026-03-07
 
 Purpose: fast-start context for new coding sessions in this repo. Read this first, then open only the files relevant to the task. This file is a map, not the source of truth.
 
 ## Product
 
-- `smm_panel` is a FastAPI-based Facebook automation panel.
+- `smm_panel` is a Uvicorn-served FastAPI Facebook automation panel.
 - UI is server-rendered from one main template: `templates/index.html`.
 - Browser automation runs through Camoufox + Playwright in `worker.py`.
 - Persistence is SQLite by default via async SQLAlchemy.
@@ -75,6 +75,10 @@ Stores one warmup session:
 - Dispatcher lives in `_wait_for_checkpoint_resolution()`.
 - Face verification is surfaced, not solved automatically.
 - `Account.last_checkpoint_type` is exposed in API and shown in UI.
+- Current text coverage also includes:
+  - `auth_platform/codesubmit`
+  - `two_step_verification/authentication`
+  - locked-account intro text like `hesabın sana ait olduğunu onayla`
 
 ### Bulk import
 
@@ -91,6 +95,35 @@ Stores one warmup session:
 - `worker.py` rotates mobile proxies before browser start and logs IP when available.
 - API endpoint: `POST /api/accounts/{account_id}/rotate-ip`
 
+### Facebook email verification via `kh-mail`
+
+- `imap.kh-mail.com` is unreliable in practice in this environment:
+  - DNS may fail
+  - raw SSL IMAP on `kh-mail.com:993` may EOF
+- `imap_utils.py` now has a webmail fallback for `kh-mail.com` using SnappyMail at `http://kh-mail.com/`.
+- Important operational caveat:
+  - inbox can contain multiple recent Facebook codes
+  - stale code reuse was a real bug
+  - code retrieval now supports `ignore_codes` so retry flows do not resubmit an already rejected code
+- Relevant screenshots from the live investigation:
+  - `screenshots/kh_mail_dump.png`
+  - `screenshots/live_worker_login_verify/20260307_165858/`
+  - `screenshots/direct_fill_probe/20260307_171547/`
+
+### Live login instability notes
+
+- Same account/proxy can currently produce different Facebook outcomes across attempts:
+  - direct success to home
+  - `auth_platform/codesubmit`
+  - locked-account intro with `Başla`
+  - explicit wrong-password screen
+- This means not every failure is a local parser bug; Facebook is varying the server-side branch for the same credentials/proxy.
+- Recent worker hardening added:
+  - post-submit login wait loop
+  - input value verification with `fill()` fallback after human typing mismatch
+  - `codesubmit` resend + retry with ignored stale codes
+  - locked-account intro detection routed through `suspicious_login`
+
 ## Worker Notes
 
 - Main class: `FacebookBrowser`
@@ -99,6 +132,7 @@ Stores one warmup session:
   - restores `storage_state` when available
   - checks session liveness with `_check_session_alive()`
   - can retry login once after mobile proxy rotation on checkpoint/captcha-style failures
+  - verifies input DOM value after typing login/password/code and falls back to exact `fill()` if characters were lost
   - logs through `logger.info / warning / error` with account context
 - Screenshots for face checkpoints are stored under `./screenshots`
 
@@ -116,7 +150,8 @@ Endpoints that changed recently and are likely relevant:
 
 ## Frontend Notes
 
-- UI stack: Tailwind CDN + Font Awesome 5.15.4 + JetBrains Mono.
+- UI stack: Tailwind CDN + Font Awesome 5.15.4.
+- Current font direction is not JetBrains Mono-only anymore; the main UI was restyled to a more minimal glass look with Cyrillic-safe fonts.
 - New UI icons should use Font Awesome classes already in `templates/index.html`.
 - Do not introduce emoji for status indicators in UI; use icons.
 - Most frontend behavior lives inline in `templates/index.html`, so targeted edits usually happen there.
