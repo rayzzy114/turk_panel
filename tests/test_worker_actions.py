@@ -776,6 +776,47 @@ async def test_login_does_not_treat_standard_login_page_as_saved_profile(
 
 
 @pytest.mark.asyncio
+async def test_login_uses_placeholder_identifier_field_on_standard_login_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    email_input = FakeLocator()
+    password_input = FakeLocator()
+    page = FakePage(
+        selector_locators={
+            'input[placeholder*="E-posta"]': email_input,
+            "input[type='password']": password_input,
+            'input[name="pass"]': password_input,
+        },
+        body_text="Facebook'a Giriş Yap E-posta adresi veya cep telefonu numarası Şifre",
+    )
+    browser = _create_browser_with_page(page, cookies_data=[])
+
+    auth_checks = iter([False, True])
+
+    async def _fake_is_authorized() -> bool:
+        return next(auth_checks)
+
+    async def _noop_raise_if_checkpoint(stage: str) -> None:
+        _ = stage
+        return None
+
+    async def _noop_raise_if_invalid_credentials(stage: str) -> None:
+        _ = stage
+        return None
+
+    monkeypatch.setattr(browser, "_is_authorized", _fake_is_authorized)
+    monkeypatch.setattr(browser, "_raise_if_checkpoint", _noop_raise_if_checkpoint)
+    monkeypatch.setattr(
+        browser, "_raise_if_invalid_credentials", _noop_raise_if_invalid_credentials
+    )
+
+    await browser.login()
+
+    assert email_input.click_calls == 1
+    assert "".join(page.keyboard.typed) == "demo_userdemo_pass"
+
+
+@pytest.mark.asyncio
 async def test_login_raises_invalid_credentials_on_wrong_password_modal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

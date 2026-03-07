@@ -609,7 +609,7 @@ class FacebookBrowser:
             return
 
         # Человеческий ввод логина
-        email_field = self.page.locator('input[name="email"]')
+        email_field = await self._find_login_identifier_field()
         await email_field.click()
         await self._human_type(self.account.login)
 
@@ -639,6 +639,27 @@ class FacebookBrowser:
 
         await self._log("Успешный вход по логину и паролю.")
 
+    async def _find_login_identifier_field(self) -> Any:
+        """Finds the standard Facebook login/email/phone input on the normal login page."""
+        selectors = [
+            'input[name="email"]',
+            'input[autocomplete="username"]',
+            'input[placeholder*="E-posta"]',
+            'input[aria-label*="E-posta"]',
+            'input[placeholder*="email"]',
+            'input[aria-label*="email"]',
+            'input[placeholder*="phone"]',
+            'input[aria-label*="phone"]',
+        ]
+        for selector in selectors:
+            try:
+                field = self.page.locator(selector).first
+                if await field.count() > 0 and await field.is_visible(timeout=800):
+                    return field
+            except Exception:
+                continue
+        return self.page.locator('input[name="email"]').first
+
     async def _handle_saved_profile_login(self) -> bool:
         """Handles Facebook saved-profile login walls that ask only for the password."""
         async def _find_named_action(pattern: re.Pattern[str]) -> Any | None:
@@ -651,10 +672,8 @@ class FacebookBrowser:
                     continue
             return None
 
-        email_field = self.page.locator(
-            'input[name="email"], input[autocomplete="username"]'
-        ).first
         try:
+            email_field = await self._find_login_identifier_field()
             if await email_field.count() > 0 and await email_field.is_visible(timeout=800):
                 return False
         except Exception:
