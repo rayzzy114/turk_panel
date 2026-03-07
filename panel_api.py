@@ -13,8 +13,8 @@ class PanelAPI:
         api_key: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        self.base_url = base_url or "https://medyabayim.com/api/v2"
-        self.api_key = api_key or "2f27efe775f5482cccbb9e987977fb7c"
+        self.base_url = base_url or os.getenv("MEDYABAYIM_API_URL", "https://medyabayim.com/api/v2")
+        self.api_key = api_key or os.getenv("MEDYABAYIM_API_KEY")
         if not self.api_key:
             raise RuntimeError("Не задан MEDYABAYIM_API_KEY.")
         self._client = httpx.AsyncClient(

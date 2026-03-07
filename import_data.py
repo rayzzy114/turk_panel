@@ -360,7 +360,7 @@ def convert_dolphin_cookies(dolphin_cookies: list[dict[str, Any]]) -> list[dict[
     dropped = 0
     for item in dolphin_cookies:
         domain = str(item.get("domain") or "").strip()
-        if "facebook.com" not in domain:
+        if not (domain == "facebook.com" or domain.endswith(".facebook.com")):
             dropped += 1
             continue
         name = str(item.get("name") or "").strip()
@@ -405,7 +405,7 @@ def normalize_cookies(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
     dropped = 0
     for item in raw:
         domain = str(item.get("domain") or "").strip()
-        if domain and "facebook.com" not in domain:
+        if domain and not (domain == "facebook.com" or domain.endswith(".facebook.com")):
             dropped += 1
             continue
         normalized = dict(item)
