@@ -22,7 +22,7 @@ from sqlalchemy.orm import selectinload
 
 from apify_api import ApifyAPI, ApifyAPIError
 from iproxy_utils import get_current_ip, rotate_mobile_ip
-from mtp_api import MtpAPI
+from panel_api import PanelAPI
 from models import (
     Account,
     AccountStatus,
@@ -193,11 +193,11 @@ def _parse_bool(value: str | None, *, default: bool = True) -> bool:
 
 def _get_service_id(action: TaskActionType) -> int:
     if action == TaskActionType.LIKE_POST:
-        return int(os.getenv("MORETHAN_LIKE_ID", "0"))
+        return 11928
     if action == TaskActionType.FOLLOW:
-        return int(os.getenv("MORETHAN_FOLLOW_ID", "0"))
+        return 11927
     if action == TaskActionType.LIKE_COMMENT:
-        return int(os.getenv("MORETHAN_LIKE_COMMENT_ID", "0"))
+        return 2057
     raise RuntimeError(f"Для action_type={action.value} нет внешнего service ID.")
 
 
@@ -728,16 +728,16 @@ async def _process_provider_task_with_quantity(
             raise RuntimeError(
                 f"Не задан service ID для action_type={task.action_type.value}."
             )
-        mtp = MtpAPI()
+        panel = PanelAPI()
         try:
             kwargs = {}
             if username:
                 kwargs["username"] = username
-            order_id = await mtp.add_order(
+            order_id = await panel.add_order(
                 service_id=service_id, link=task.target_url, quantity=quantity, **kwargs
             )
         finally:
-            await mtp.aclose()
+            await panel.aclose()
         task.external_order_id = order_id
         task.status = TaskStatus.SUCCESS
 
@@ -2233,11 +2233,11 @@ async def get_tasks() -> list[TaskOut]:
 
 @app.get("/api/balance")
 async def get_balance() -> dict[str, Any]:
-    mtp = MtpAPI()
+    panel = PanelAPI()
     try:
-        return await mtp.get_balance()
+        return await panel.get_balance()
     finally:
-        await mtp.aclose()
+        await panel.aclose()
 
 
 @app.post("/api/tasks", response_model=TaskOut, status_code=201)

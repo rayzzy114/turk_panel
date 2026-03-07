@@ -9,7 +9,7 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from mtp_api import MtpAPI
+from panel_api import PanelAPI
 
 
 @pytest.mark.asyncio
@@ -25,8 +25,8 @@ async def test_add_order_returns_order_id(monkeypatch: pytest.MonkeyPatch) -> No
         return httpx.Response(200, json={"order": 98765})
 
     transport = httpx.MockTransport(handler)
-    monkeypatch.setenv("MORETHAN_API_KEY", "secret")
-    client = MtpAPI(base_url="https://mtp.test/api/v2", transport=transport)
+    monkeypatch.setenv("MEDYABAYIM_API_KEY", "secret")
+    client = PanelAPI(base_url="https://mtp.test/api/v2", transport=transport)
     try:
         order_id = await client.add_order(
             service_id=11, link="https://example.com/post", quantity=50
@@ -49,8 +49,8 @@ async def test_get_status_and_balance(monkeypatch: pytest.MonkeyPatch) -> None:
         return httpx.Response(400, json={"error": "bad action"})
 
     transport = httpx.MockTransport(handler)
-    monkeypatch.setenv("MORETHAN_API_KEY", "secret")
-    client = MtpAPI(base_url="https://mtp.test/api/v2", transport=transport)
+    monkeypatch.setenv("MEDYABAYIM_API_KEY", "secret")
+    client = PanelAPI(base_url="https://mtp.test/api/v2", transport=transport)
     try:
         status = await client.get_status(order_id=555)
         balance = await client.get_balance()

@@ -1,14 +1,14 @@
 import asyncio
 import pytest
-from mtp_api import MtpAPI
+from panel_api import PanelAPI
 
 
 @pytest.mark.asyncio
-async def test_mtp():
-    api = MtpAPI()
+async def test_panel():
+    api = PanelAPI()
     try:
         balance = await api.get_balance()
-        print("MTP Balance:", balance)
+        print("Panel Balance:", balance)
 
         services = await api._post("services")
         if isinstance(services, list) and len(services) > 0:

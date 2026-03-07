@@ -11,7 +11,7 @@
 - импортировать аккаунты из обычного colon-формата и турецкого shop-формата;
 - работать с mobile proxy и вызывать принудительную ротацию IP;
 - парсить комментарии Facebook через Apify;
-- отправлять provider-заказы через MoreThanPanel.
+- отправлять provider-заказы через Medyabayim.
 
 ## Стек
 
@@ -33,7 +33,7 @@
 - `import_data.py` — парсинг и импорт аккаунтов/прокси
 - `iproxy_utils.py` — rotation endpoint и проверка внешнего IP через прокси
 - `apify_api.py` — клиент для Apify comments scraper
-- `mtp_api.py` — клиент для MoreThanPanel
+- `panel_api.py` — клиент для Medyabayim
 - `templates/index.html` — основной UI
 - `tests/` — pytest-набор
 
@@ -80,11 +80,7 @@ ADMIN_PASS=admin
 FB_HEADLESS=true
 FB_USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36
 
-MORETHAN_API_URL=https://morethanpanel.com/api/v2
-MORETHAN_API_KEY=
-MORETHAN_LIKE_ID=0
-MORETHAN_FOLLOW_ID=0
-MORETHAN_LIKE_COMMENT_ID=0
+MEDYABAYIM_API_KEY=2f27efe775f5482cccbb9e987977fb7c
 
 APIFY_API_TOKEN=
 APIFY_ACTOR_ID=apify/facebook-comments-scraper
@@ -221,7 +217,7 @@ facebook giriş: 61581112340247   şifre: l51dxqwk033e11   mail: tillielarriva36
 - `reply_comment`
 - `check_login`
 
-Часть действий уходит во внешний provider через MoreThanPanel, часть выполняется браузерным ботом.
+Часть действий уходит во внешний provider через Medyabayim, часть выполняется браузерным ботом.
 
 ### Парсер комментариев
 
