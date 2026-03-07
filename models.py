@@ -27,9 +27,11 @@ class Base(AsyncAttrs, DeclarativeBase):
 class AccountStatus(str, enum.Enum):
     ACTIVE = "active"
     BANNED = "banned"
+    ERROR = "error"
     SHADOW_BANNED = "shadow_banned"
     CHECKPOINT = "checkpoint"
     CAPTCHA_BLOCKED = "captcha_blocked"
+    COOKIE_INVALID = "cookie_invalid"
     INVALID_CREDENTIALS = "invalid_credentials"
 
 

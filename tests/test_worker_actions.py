@@ -13,6 +13,7 @@ import worker
 from models import CheckpointType
 from worker import (
     AccountCaptchaError,
+    AccountCookieInvalidError,
     AccountCheckpointError,
     AccountInvalidCredentialsError,
     AccountSessionData,
@@ -206,9 +207,19 @@ class FakeKeyboard:
 class FakeContext:
     def __init__(self, cookies_data: list[dict[str, Any]] | None = None) -> None:
         self._cookies_data = list(cookies_data or [])
+        self.added_cookies: list[list[dict[str, Any]]] = []
+        self.clear_calls = 0
 
     async def cookies(self) -> list[dict[str, Any]]:
         return list(self._cookies_data)
+
+    async def add_cookies(self, cookies: list[dict[str, Any]]) -> None:
+        self.added_cookies.append(list(cookies))
+        self._cookies_data = list(cookies)
+
+    async def clear_cookies(self) -> None:
+        self.clear_calls += 1
+        self._cookies_data = []
 
 
 class FakePage:
@@ -966,6 +977,118 @@ async def test_login_raises_invalid_credentials_on_wrong_password_modal(
 
     with pytest.raises(AccountInvalidCredentialsError, match="rejected login credentials"):
         await browser.login()
+
+
+@pytest.mark.asyncio
+async def test_login_tries_storage_state_before_raw_cookies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = FakePage()
+    browser = FacebookBrowser(
+        account=AccountSessionData(
+            login="demo_user",
+            password="demo_pass",
+            user_agent="Mozilla/5.0 test",
+            cookies=[
+                {
+                    "name": "xs",
+                    "value": "cookie-only",
+                    "domain": ".facebook.com",
+                    "path": "/",
+                    "expirationDate": 100.5,
+                    "sameSite": "no_restriction",
+                }
+            ],
+            storage_state={
+                "cookies": [
+                    {
+                        "name": "c_user",
+                        "value": "123",
+                        "domain": ".facebook.com",
+                        "path": "/",
+                        "expires": 999,
+                    }
+                ]
+            },
+        )
+    )
+    browser._page = cast(Any, page)
+    browser._context = cast(Any, FakeContext([]))
+
+    auth_checks = iter([False, True])
+
+    async def _fake_is_authorized() -> bool:
+        return next(auth_checks)
+
+    monkeypatch.setattr(browser, "_is_authorized", _fake_is_authorized)
+
+    await browser.login()
+
+    assert browser._context.added_cookies == [
+        [
+            {
+                "name": "c_user",
+                "value": "123",
+                "domain": ".facebook.com",
+                "path": "/",
+                "expires": 999,
+            }
+        ]
+    ]
+    assert page.goto_urls == []
+
+
+@pytest.mark.asyncio
+async def test_login_raises_cookie_invalid_when_cookie_only_session_cannot_be_restored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = FakePage()
+    browser = FacebookBrowser(
+        account=AccountSessionData(
+            login="demo_user",
+            password="__COOKIE_ONLY__",
+            user_agent="Mozilla/5.0 test",
+            cookies=[
+                {
+                    "name": "xs",
+                    "value": "cookie-only",
+                    "domain": ".facebook.com",
+                    "path": "/",
+                    "expirationDate": 100.5,
+                    "sameSite": "no_restriction",
+                }
+            ],
+        )
+    )
+    browser._page = cast(Any, page)
+    browser._context = cast(Any, FakeContext([]))
+
+    auth_checks = iter([False, False])
+
+    async def _fake_is_authorized() -> bool:
+        return next(auth_checks)
+
+    monkeypatch.setattr(browser, "_is_authorized", _fake_is_authorized)
+
+    with pytest.raises(AccountCookieInvalidError, match="Re-import cookies from Dolphin"):
+        await browser.login()
+
+    assert browser._context.added_cookies == [
+        [
+            {
+                "name": "xs",
+                "value": "cookie-only",
+                "domain": ".facebook.com",
+                "path": "/",
+                "expires": 100,
+                "httpOnly": False,
+                "secure": False,
+                "sameSite": "None",
+            }
+        ]
+    ]
+    assert browser._context.clear_calls == 1
+    assert page.goto_urls == []
 
 
 @pytest.mark.asyncio

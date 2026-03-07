@@ -20,7 +20,11 @@ from models import (
     TaskStatus,
     TaskActionType,
 )
-from worker import AccountCaptchaError, AccountInvalidCredentialsError
+from worker import (
+    AccountCaptchaError,
+    AccountCookieInvalidError,
+    AccountInvalidCredentialsError,
+)
 import api as api_module
 import importlib
 
@@ -456,6 +460,30 @@ async def test_mark_account_invalid_credentials_sets_special_status(setup_db):
         await session.refresh(acc)
 
         assert acc.status == AccountStatus.INVALID_CREDENTIALS
+        assert acc.last_checkpoint_type is None
+
+
+@pytest.mark.asyncio
+async def test_mark_account_cookie_invalid_sets_special_status(setup_db):
+    async_session = setup_db
+    async with async_session() as session:
+        acc = Account(
+            login="cookie_invalid_user",
+            password="__COOKIE_ONLY__",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add(acc)
+        await session.commit()
+
+        await api_module._mark_account_cookie_invalid(
+            session,
+            acc,
+            reason="cookie restore failed",
+        )
+        await session.refresh(acc)
+
+        assert acc.status == AccountStatus.COOKIE_INVALID
         assert acc.last_checkpoint_type is None
 
 
@@ -1615,6 +1643,251 @@ async def test_warmup_invalid_credentials_marks_account_special_status(
         assert task.status == TaskStatus.ERROR
         assert account.status == AccountStatus.INVALID_CREDENTIALS
         assert any("Facebook отклонил логин или пароль" in message for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_check_login_cookie_invalid_marks_account_special_status(
+    setup_db, monkeypatch
+):
+    async_session = setup_db
+    async with async_session() as session:
+        acc = Account(
+            login="cookie_invalid_check",
+            password="__COOKIE_ONLY__",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add(acc)
+        await session.commit()
+        await session.refresh(acc)
+        acc_id = acc.id
+        task = Task(
+            account_id=acc_id,
+            action_type=TaskActionType.CHECK_LOGIN,
+            target_url="https://www.facebook.com/",
+            target_gender="ANY",
+            status=TaskStatus.PENDING,
+        )
+        session.add(task)
+        await session.commit()
+        await session.refresh(task)
+        task_id = task.id
+
+    class CookieInvalidBrowser:
+        def __init__(
+            self,
+            account,
+            headless: bool = True,
+            strict_cookie_session: bool = True,
+            log_callback=None,
+        ) -> None:
+            self.account = account
+            self.log_callback = log_callback
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def login(self) -> None:
+            raise AccountCookieInvalidError("Re-import cookies from Dolphin")
+
+    monkeypatch.setattr(api_module, "FacebookBrowser", CookieInvalidBrowser)
+    importlib.reload(api_module)
+    monkeypatch.setattr(api_module, "FacebookBrowser", CookieInvalidBrowser)
+
+    async with async_session() as session:
+        task = await session.get(Task, task_id)
+        assert task is not None
+        finished = await api_module._process_browser_task(session, task)
+        await session.refresh(task)
+        account = await session.get(Account, acc_id)
+        assert account is not None
+        task_logs = (
+            await session.scalars(select(Log).where(Log.task_id == task_id))
+        ).all()
+        messages = [row.message for row in task_logs]
+
+        assert finished is True
+        assert task.status == TaskStatus.ERROR
+        assert account.status == AccountStatus.COOKIE_INVALID
+        assert any("Re-import cookies from Dolphin" in message for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_cookie_import_endpoint_valid_dolphin(setup_db):
+    async_session = setup_db
+    async with async_session() as session:
+        acc = Account(
+            login="cookie_upload_user",
+            password="__COOKIE_ONLY__",
+            status=AccountStatus.COOKIE_INVALID,
+            user_agent="ua",
+        )
+        session.add(acc)
+        await session.commit()
+        await session.refresh(acc)
+        acc_id = acc.id
+
+    importlib.reload(api_module)
+    transport = httpx.ASGITransport(app=api_module.app)
+    cookies = [
+        {
+            "name": "c_user",
+            "value": "123",
+            "domain": ".facebook.com",
+            "path": "/",
+            "expirationDate": 1804288039.5,
+            "sameSite": "no_restriction",
+        },
+        {
+            "name": "xs",
+            "value": "abc",
+            "domain": ".facebook.com",
+            "path": "/",
+            "expirationDate": 1804288039.5,
+            "sameSite": "lax",
+        },
+        {
+            "name": "datr",
+            "value": "dev",
+            "domain": ".facebook.com",
+            "path": "/",
+            "expirationDate": 1804288039.5,
+            "sameSite": "lax",
+        },
+        {
+            "name": "nid",
+            "value": "skip",
+            "domain": ".google.com",
+            "path": "/",
+            "expirationDate": 1804288039.5,
+        },
+    ]
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        resp = await client.post(
+            f"/api/accounts/{acc_id}/cookies",
+            json={"cookies": cookies},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["detected_format"] == "dolphin"
+        assert payload["cookies_received"] == 4
+        assert payload["cookies_kept"] == 3
+        assert payload["cookies_dropped"] == 1
+        assert payload["missing_required"] == []
+
+    async with async_session() as session:
+        account = await session.get(Account, acc_id)
+        assert account is not None
+        assert account.status == AccountStatus.ACTIVE
+        assert account.cookies is not None
+        assert all("expirationDate" not in item for item in account.cookies)
+
+
+@pytest.mark.asyncio
+async def test_cookie_import_endpoint_missing_c_user(setup_db):
+    async_session = setup_db
+    async with async_session() as session:
+        acc = Account(
+            login="cookie_upload_missing_c_user",
+            password="__COOKIE_ONLY__",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add(acc)
+        await session.commit()
+        await session.refresh(acc)
+        acc_id = acc.id
+
+    importlib.reload(api_module)
+    transport = httpx.ASGITransport(app=api_module.app)
+    cookies = [
+        {"name": "xs", "value": "abc", "domain": ".facebook.com", "path": "/", "expires": 10},
+        {"name": "datr", "value": "dev", "domain": ".facebook.com", "path": "/", "expires": 10},
+    ]
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        resp = await client.post(
+            f"/api/accounts/{acc_id}/cookies",
+            json={"cookies": cookies},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert "c_user" in detail["missing_required"]
+
+
+@pytest.mark.asyncio
+async def test_cookie_import_endpoint_missing_xs(setup_db):
+    async_session = setup_db
+    async with async_session() as session:
+        acc = Account(
+            login="cookie_upload_missing_xs",
+            password="__COOKIE_ONLY__",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add(acc)
+        await session.commit()
+        await session.refresh(acc)
+        acc_id = acc.id
+
+    importlib.reload(api_module)
+    transport = httpx.ASGITransport(app=api_module.app)
+    cookies = [
+        {"name": "c_user", "value": "123", "domain": ".facebook.com", "path": "/", "expires": 10},
+        {"name": "datr", "value": "dev", "domain": ".facebook.com", "path": "/", "expires": 10},
+    ]
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        resp = await client.post(
+            f"/api/accounts/{acc_id}/cookies",
+            json={"cookies": cookies},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert "xs" in detail["missing_required"]
+
+
+@pytest.mark.asyncio
+async def test_cookie_import_endpoint_only_google_cookies(setup_db):
+    async_session = setup_db
+    async with async_session() as session:
+        acc = Account(
+            login="cookie_upload_google_only",
+            password="__COOKIE_ONLY__",
+            status=AccountStatus.ACTIVE,
+            user_agent="ua",
+        )
+        session.add(acc)
+        await session.commit()
+        await session.refresh(acc)
+        acc_id = acc.id
+
+    importlib.reload(api_module)
+    transport = httpx.ASGITransport(app=api_module.app)
+    cookies = [
+        {"name": "nid", "value": "skip", "domain": ".google.com", "path": "/", "expires": 10}
+    ]
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        resp = await client.post(
+            f"/api/accounts/{acc_id}/cookies",
+            json={"cookies": cookies},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert detail["cookies_kept"] == 0
 
 
 @pytest.mark.asyncio

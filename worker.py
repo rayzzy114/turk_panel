@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Final, cast
 
 from models import CheckpointType
+from import_data import DEFAULT_PASSWORD_PLACEHOLDER, normalize_cookies
 from imap_utils import get_facebook_code
 from iproxy_utils import get_current_ip, rotate_mobile_ip
 from camoufox.async_api import AsyncCamoufox
@@ -89,6 +90,10 @@ class AccountBannedError(RuntimeError):
 
 class AccountInvalidCredentialsError(RuntimeError):
     """Raised when Facebook explicitly reports invalid login credentials."""
+
+
+class AccountCookieInvalidError(RuntimeError):
+    """Raised when cookie-only session data cannot restore authorization."""
 
 
 class FacebookBrowser:
@@ -614,16 +619,40 @@ class FacebookBrowser:
             await self._log("Авторизация успешна (storage_state/cookies активны).")
             return
 
-        if self.account.cookies and not self.account.storage_state:
+        if self.account.storage_state:
+            await self._log("Пробую восстановить сессию из storage_state...")
+            if not self._context:
+                raise RuntimeError("Browser context is not initialized")
+            storage_cookies = normalize_cookies(
+                cast(list[dict[str, Any]], self.account.storage_state.get("cookies", []))
+            )
+            if storage_cookies:
+                await self._context.add_cookies(cast(Any, storage_cookies))
+                if await self._is_authorized():
+                    await self._log("Авторизация через storage_state успешна.")
+                    return
+                await self._context.clear_cookies()
+
+        if self.account.cookies:
             await self._log("Имеются только куки, пробую авторизоваться через них...")
             if not self._context:
                 raise RuntimeError("Browser context is not initialized")
-            cookies_payload = cast(list[dict[str, Any]], self.account.cookies)
-            await self._context.add_cookies(cast(Any, cookies_payload))
-            if await self._is_authorized():
-                await self._log("Авторизация по кукам успешна.")
-                return
-            await self._context.clear_cookies()
+            cookies_payload = normalize_cookies(cast(list[dict[str, Any]], self.account.cookies))
+            if not cookies_payload:
+                self.logger.warning(
+                    "No valid Facebook cookies found after normalization for account %s",
+                    self.account.account_id or self.account.login,
+                )
+            else:
+                await self._context.add_cookies(cast(Any, cookies_payload))
+                if await self._is_authorized():
+                    await self._log("Авторизация по кукам успешна.")
+                    return
+                await self._context.clear_cookies()
+
+        if self.account.password == DEFAULT_PASSWORD_PLACEHOLDER:
+            await self._log("Куки не восстановили сессию. Re-import cookies from Dolphin.")
+            raise AccountCookieInvalidError("Re-import cookies from Dolphin")
 
         await self._log("Сессия не найдена, вхожу по логину...")
         await self.page.goto(self.BASE_URL, wait_until="domcontentloaded")
@@ -1241,9 +1270,11 @@ class FacebookBrowser:
             return False
 
         try:
-            cookies = self.account.storage_state.get("cookies", [])
+            cookies = normalize_cookies(
+                cast(list[dict[str, Any]], self.account.storage_state.get("cookies", []))
+            )
             if cookies:
-                await self._context.add_cookies(cookies)
+                await self._context.add_cookies(cast(Any, cookies))
             await self.page.goto(
                 self.BASE_URL,
                 wait_until="domcontentloaded",

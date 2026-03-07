@@ -8,7 +8,7 @@ import re
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from dotenv import load_dotenv
 from sqlalchemy import select
@@ -319,6 +319,108 @@ def parse_netscape_cookies(lines: list[str]) -> list[dict[str, str]]:
     return list(dedup.values())
 
 
+def _normalize_samesite(value: str) -> str:
+    """
+    Maps Chrome-extension sameSite values to Playwright-compatible values.
+
+    Unknown values default to ``Lax``.
+    """
+    normalized = value.strip().lower()
+    mapping = {
+        "no_restriction": "None",
+        "none": "None",
+        "lax": "Lax",
+        "strict": "Strict",
+    }
+    return mapping.get(normalized, "Lax")
+
+
+def detect_cookie_format(raw: list[dict[str, Any]]) -> str:
+    """
+    Detects known cookie payload format.
+
+    Returns one of: ``dolphin``, ``playwright``, or ``unknown``.
+    """
+    for item in raw:
+        if "expirationDate" in item:
+            return "dolphin"
+    for item in raw:
+        if "expires" in item:
+            return "playwright"
+    return "unknown"
+
+
+def convert_dolphin_cookies(dolphin_cookies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Converts Dolphin Anty cookie export format to Playwright-compatible cookies.
+
+    Only Facebook-domain cookies are kept.
+    """
+    converted: list[dict[str, Any]] = []
+    dropped = 0
+    for item in dolphin_cookies:
+        domain = str(item.get("domain") or "").strip()
+        if "facebook.com" not in domain:
+            dropped += 1
+            continue
+        name = str(item.get("name") or "").strip()
+        value = str(item.get("value") or "")
+        if not name:
+            dropped += 1
+            continue
+        is_session_cookie = bool(item.get("session"))
+        expiration = item.get("expirationDate")
+        expires = -1
+        if not is_session_cookie and expiration is not None:
+            expires = int(float(expiration))
+        converted.append(
+            {
+                "name": name,
+                "value": value,
+                "domain": domain,
+                "path": str(item.get("path") or "/"),
+                "expires": expires,
+                "httpOnly": bool(item.get("httpOnly", False)),
+                "secure": bool(item.get("secure", False)),
+                "sameSite": _normalize_samesite(str(item.get("sameSite") or "lax")),
+            }
+        )
+    LOGGER.debug(
+        "Converted Dolphin cookies: kept=%s dropped=%s", len(converted), dropped
+    )
+    return converted
+
+
+def normalize_cookies(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Normalizes cookie payloads into a Playwright-compatible shape.
+
+    This is the only public entry point for cookie handling.
+    """
+    detected_format = detect_cookie_format(raw)
+    if detected_format == "dolphin":
+        return convert_dolphin_cookies(raw)
+
+    filtered: list[dict[str, Any]] = []
+    dropped = 0
+    for item in raw:
+        domain = str(item.get("domain") or "").strip()
+        if domain and "facebook.com" not in domain:
+            dropped += 1
+            continue
+        normalized = dict(item)
+        if "sameSite" in normalized:
+            normalized["sameSite"] = _normalize_samesite(str(normalized["sameSite"]))
+        filtered.append(normalized)
+    if detected_format == "unknown":
+        LOGGER.warning("Unknown cookie format detected, passing through %s cookies", len(filtered))
+    else:
+        LOGGER.debug(
+            "Normalized Playwright cookies: kept=%s dropped=%s", len(filtered), dropped
+        )
+    return filtered
+
+
 def extract_user_agent(text: str) -> str | None:
     fallback = None
     for line in text.splitlines():
@@ -412,27 +514,15 @@ def _try_parse_json_cookies(content: str) -> ParsedAccount | None:
     try:
         data = json.loads(content)
         if isinstance(data, list) and len(data) > 0:
-            cookies = []
+            cookies = normalize_cookies(
+                [item for item in data if isinstance(item, dict)]
+            )
             login = None
             for item in data:
                 if not isinstance(item, dict):
                     continue
-                name = item.get("name")
-                value = item.get("value")
-                domain = item.get("domain")
-                path = item.get("path") or "/"
-
-                if name and value:
-                    cookies.append(
-                        {
-                            "name": str(name),
-                            "value": str(value),
-                            "domain": str(domain) if domain else ".facebook.com",
-                            "path": str(path),
-                        }
-                    )
-                    if name == "c_user":
-                        login = str(value)
+                if item.get("name") == "c_user" and item.get("value"):
+                    login = str(item["value"])
 
             if login and cookies:
                 return ParsedAccount(

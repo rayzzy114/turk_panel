@@ -958,6 +958,28 @@
       </div>
     </div>
 
+    <div id="accountCookiesModal" class="modal-backdrop hidden fixed inset-0 flex items-center justify-center p-4 z-50" role="dialog" aria-modal="true" aria-labelledby="accountCookiesModalTitle">
+      <div class="panel-card modal-panel p-6 max-w-2xl" tabindex="-1">
+        <div class="modal-header">
+          <h2 id="accountCookiesModalTitle" class="section-title text-lg font-bold uppercase"><i class="fas fa-cookie-bite" aria-hidden="true"></i><span>Импорт кук</span></h2>
+          <button type="button" onclick="closeAccountCookiesModal()" class="icon-btn modal-close text-lg leading-none" aria-label="Закрыть"><i class="fas fa-times" aria-hidden="true"></i></button>
+        </div>
+        <div class="modal-body space-y-4 text-sm">
+          <div>
+            <div class="text-zinc-500 text-xs uppercase tracking-wider mb-1">Аккаунт</div>
+            <div id="accountCookiesAccountLogin" class="font-semibold text-zinc-100 break-all leading-snug">-</div>
+          </div>
+          <p class="modal-note">Вставь raw JSON cookies из Dolphin. Панель сама определит формат, оставит только Facebook cookies и покажет, каких обязательных кук не хватает.</p>
+          <textarea id="accountCookiesInput" class="w-full h-56 rounded-xl px-4 py-3 text-sm font-mono" placeholder='[{"name":"c_user","value":"...","domain":".facebook.com","path":"/","expirationDate":1804288039.5}]'></textarea>
+          <div id="accountCookiesStatus" class="hidden rounded-2xl border border-white/8 bg-white/[0.04] px-4 py-3 text-xs leading-6 text-zinc-300"></div>
+        </div>
+        <div class="modal-footer">
+          <button onclick="closeAccountCookiesModal()" class="btn-ui btn-neutral">Отмена</button>
+          <button id="accountCookiesSaveBtn" onclick="submitAccountCookies()" class="btn-ui btn-primary"><i class="fas fa-file-import" aria-hidden="true"></i><span>Сохранить куки</span></button>
+        </div>
+      </div>
+    </div>
+
     <div id="accountImportModal" class="modal-backdrop hidden fixed inset-0 flex items-center justify-center p-4 z-50" role="dialog" aria-modal="true" aria-labelledby="accountImportModalTitle">
       <div class="panel-card modal-panel p-6 max-w-2xl">
         <div class="modal-header">
@@ -1132,6 +1154,7 @@
       function statusBadge(status) {
         const base = "account-status-badge inline-flex items-center justify-center h-7 px-2.5 rounded-full font-semibold text-[10px] uppercase tracking-[0.14em] border ";
         if (status === "active" || status === "success") return base + "bg-emerald-500/7 text-zinc-100 border-emerald-400/15";
+        if (status === "cookie_invalid") return base + "bg-amber-500/8 text-zinc-100 border-amber-300/18";
         if (status === "error" || status === "banned") return base + "bg-red-500/7 text-zinc-100 border-red-400/14";
         if (status === "invalid_credentials") return base + "bg-rose-500/8 text-zinc-100 border-rose-400/16";
         if (status === "shadow_banned") return base + "bg-white/4 text-zinc-100 border-white/10";
@@ -1144,6 +1167,7 @@
         const labels = {
           active: "ACTIVE",
           banned: "BANNED",
+          cookie_invalid: "COOKIE",
           shadow_banned: "SHADOW",
           checkpoint: "CHECKPOINT",
           captcha_blocked: "CAPTCHA",
@@ -1200,10 +1224,20 @@
 
       function renderAccountStatus(account) {
         const checkpointIcon = checkpointTypeIcon(account.last_checkpoint_type);
+        const cookieInvalidAction = account.status === "cookie_invalid"
+          ? `<button
+              type="button"
+              onclick="showAccountCookiesModal(${account.id})"
+              class="action-icon-btn"
+              title="Re-import cookies from Dolphin"
+              aria-label="Re-import cookies for account ${escapeHtml(account.login)}"
+            ><i class="fas fa-cookie-bite" aria-hidden="true"></i></button>`
+          : "";
         const badge = `
           <div class="flex items-center justify-center gap-1.5">
             <span class="${statusBadge(account.status)}">${escapeHtml(formatAccountStatusLabel(account.status))}</span>
             ${checkpointIcon}
+            ${cookieInvalidAction}
           </div>
         `;
         const leftMs = getShadowBanRemainingMs(account);
@@ -1256,6 +1290,97 @@
         setAccountEmailModalStatus("");
         if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
           lastFocusedElement.focus();
+        }
+      }
+
+      function showAccountCookiesModal(accountId) {
+        const account = allAccounts.find((item) => item.id === Number(accountId));
+        if (!account) return;
+        activeAccountCookiesId = account.id;
+        lastFocusedElement = document.activeElement;
+        document.getElementById("accountCookiesAccountLogin").textContent = account.login || "-";
+        document.getElementById("accountCookiesInput").value = "";
+        setAccountCookiesModalStatus("", "neutral");
+        const modal = document.getElementById("accountCookiesModal");
+        modal.classList.remove("hidden");
+        document.getElementById("accountCookiesInput").focus();
+      }
+
+      function closeAccountCookiesModal() {
+        const modal = document.getElementById("accountCookiesModal");
+        modal.classList.add("hidden");
+        activeAccountCookiesId = null;
+        setAccountCookiesModalStatus("", "neutral");
+        if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+          lastFocusedElement.focus();
+        }
+      }
+
+      function setAccountCookiesModalStatus(message, tone = "neutral") {
+        const status = document.getElementById("accountCookiesStatus");
+        if (!status) return;
+        status.textContent = message || "";
+        status.classList.toggle("hidden", !message);
+        status.classList.remove(
+          "border-red-400/20",
+          "text-red-200",
+          "border-emerald-400/20",
+          "text-emerald-200",
+          "border-white/8",
+          "text-zinc-300"
+        );
+        if (tone === "success") {
+          status.classList.add("border-emerald-400/20", "text-emerald-200");
+          return;
+        }
+        if (tone === "error") {
+          status.classList.add("border-red-400/20", "text-red-200");
+          return;
+        }
+        status.classList.add("border-white/8", "text-zinc-300");
+      }
+
+      async function submitAccountCookies() {
+        if (!activeAccountCookiesId) return;
+        const input = document.getElementById("accountCookiesInput");
+        const saveBtn = document.getElementById("accountCookiesSaveBtn");
+        if (!input || !saveBtn) return;
+        let parsedCookies;
+        try {
+          parsedCookies = JSON.parse(input.value || "[]");
+        } catch (error) {
+          setAccountCookiesModalStatus("Невалидный JSON.", "error");
+          return;
+        }
+        const originalHtml = saveBtn.innerHTML;
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Сохраняю...</span>';
+        try {
+          const response = await fetch(`/api/accounts/${activeAccountCookiesId}/cookies`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cookies: parsedCookies }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const detail = payload.detail || {};
+            const missing = Array.isArray(detail.missing_required) && detail.missing_required.length
+              ? ` Не хватает: ${detail.missing_required.join(", ")}.`
+              : "";
+            setAccountCookiesModalStatus(
+              `Импорт отклонен. Формат: ${detail.detected_format || "unknown"}, получено: ${detail.cookies_received ?? 0}, оставлено: ${detail.cookies_kept ?? 0}, отброшено: ${detail.cookies_dropped ?? 0}.${missing}`,
+              "error"
+            );
+            return;
+          }
+          setAccountCookiesModalStatus(
+            `Сохранено. Формат: ${payload.detected_format}, получено: ${payload.cookies_received}, оставлено: ${payload.cookies_kept}, отброшено: ${payload.cookies_dropped}.`,
+            "success"
+          );
+          await refreshAccounts();
+        } finally {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = originalHtml;
         }
       }
 
@@ -1506,6 +1631,7 @@
       let isBulkActionRunning = false;
       let lastFocusedElement = null;
       let activeAccountEmailId = null;
+      let activeAccountCookiesId = null;
       let activeWarmupLogsAccount = null;
 
       function setBulkActionStatus(message) {
@@ -2025,6 +2151,15 @@
                     </button>
                     <button
                       type="button"
+                      onclick="showAccountCookiesModal(${a.id})"
+                      class="action-icon-btn"
+                      title="Импорт кук"
+                      aria-label="Импорт кук для ${a.login}"
+                    >
+                      <i class="fas fa-cookie-bite" aria-hidden="true"></i>
+                    </button>
+                    <button
+                      type="button"
                       onclick="showWarmupLogs(${a.id})"
                       class="action-icon-btn"
                       title="${warmupTitle}"
@@ -2278,6 +2413,7 @@
       });
 
       const accountEmailModal = document.getElementById("accountEmailModal");
+      const accountCookiesModal = document.getElementById("accountCookiesModal");
       const proxyModal = document.getElementById("proxyModal");
       const accountImportModal = document.getElementById("accountImportModal");
       const warmupLogsModal = document.getElementById("warmupLogsModal");
@@ -2285,6 +2421,11 @@
       accountEmailModal.addEventListener("click", (event) => {
         if (event.target === accountEmailModal) {
           closeAccountEmailModal();
+        }
+      });
+      accountCookiesModal.addEventListener("click", (event) => {
+        if (event.target === accountCookiesModal) {
+          closeAccountCookiesModal();
         }
       });
       proxyModal.addEventListener("click", (event) => {
@@ -2307,6 +2448,10 @@
         if (event.key !== "Escape") return;
         if (!accountEmailModal.classList.contains("hidden")) {
           closeAccountEmailModal();
+          return;
+        }
+        if (!accountCookiesModal.classList.contains("hidden")) {
+          closeAccountCookiesModal();
           return;
         }
         if (!proxyModal.classList.contains("hidden")) {

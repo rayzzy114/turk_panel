@@ -37,6 +37,7 @@ from models import (
 from worker import (
     AccountBannedError,
     AccountCaptchaError,
+    AccountCookieInvalidError,
     AccountCheckpointError,
     AccountInvalidCredentialsError,
     AccountSessionData,
@@ -44,6 +45,7 @@ from worker import (
     ProxyConfig,
 )
 from crud import get_available_proxy_id, upsert_account
+from import_data import detect_cookie_format, normalize_cookies
 
 load_dotenv()
 
@@ -175,6 +177,12 @@ class AccountUpdateIn(BaseModel):
     proxy_id: int | None = None
     proxy_type: str | None = None
     proxy_rotation_url: str | None = None
+
+
+class AccountCookiesIn(BaseModel):
+    """Raw cookie upload payload for one account."""
+
+    cookies: list[dict[str, Any]]
 
 
 def _parse_bool(value: str | None, *, default: bool = True) -> bool:
@@ -661,6 +669,20 @@ async def _mark_account_invalid_credentials(
     LOGGER.warning("Account %s invalid credentials: %s", account.login, reason)
 
 
+async def _mark_account_cookie_invalid(
+    session: Any,
+    account: Account,
+    *,
+    reason: str | Exception,
+) -> None:
+    """Marks account as requiring fresh Dolphin cookie import."""
+    account.status = AccountStatus.COOKIE_INVALID
+    account.last_checkpoint_type = None
+    session.add(account)
+    await session.commit()
+    LOGGER.warning("Account %s cookie invalid: %s", account.login, reason)
+
+
 def _mark_account_action_success(account: Account) -> None:
     today = date.today()
     if account.last_action_date == today:
@@ -1055,6 +1077,39 @@ async def _process_browser_task(session: Any, task: Task) -> bool:
             task.id,
             f"АККАУНТ {account.login} ЗАБЛОКИРОВАН FACEBOOK: {exc}",
         )
+        return True
+    except AccountCookieInvalidError as exc:
+        if (
+            task.action_type == TaskActionType.WARMUP
+            and warmup_started_at is not None
+            and not warmup_log_saved
+        ):
+            await _store_warmup_log(
+                session,
+                account_id=account.id,
+                started_at=warmup_started_at,
+                warmup_result=_warmup_error_result(str(exc)),
+            )
+        await _mark_account_cookie_invalid(session, account, reason=str(exc))
+        task.status = TaskStatus.ERROR
+        if task.action_type == TaskActionType.WARMUP:
+            await _add_task_log(
+                session,
+                task.id,
+                f"Не удалось прогреть аккаунт {account.login}: Re-import cookies from Dolphin.",
+            )
+        elif task.action_type == TaskActionType.CHECK_LOGIN:
+            await _add_task_log(
+                session,
+                task.id,
+                f"Не удалось проверить вход для аккаунта {account.login}: Re-import cookies from Dolphin.",
+            )
+        else:
+            await _add_task_log(
+                session,
+                task.id,
+                f"Аккаунт {account.login} требует свежие куки: Re-import cookies from Dolphin.",
+            )
         return True
     except AccountInvalidCredentialsError as exc:
         if (
@@ -1619,6 +1674,72 @@ async def update_account_email(
         "status": "success",
         "email_login": account.email_login,
         "email_password": account.email_password,
+    }
+
+
+@app.post("/api/accounts/{account_id}/cookies")
+async def upload_account_cookies(
+    account_id: int, payload: AccountCookiesIn
+) -> dict[str, Any]:
+    """Validates and saves normalized Facebook cookies for one account."""
+    detected_format = detect_cookie_format(payload.cookies)
+    LOGGER.debug(
+        "Detected cookie format for account %s: %s", account_id, detected_format
+    )
+    normalized = normalize_cookies(payload.cookies)
+    required_present = sorted(
+        {
+            cookie["name"]
+            for cookie in normalized
+            if cookie.get("name") in {"c_user", "xs", "datr", "sb"}
+        }
+    )
+    missing_required: list[str] = []
+    if "c_user" not in required_present:
+        missing_required.append("c_user")
+    if "xs" not in required_present:
+        missing_required.append("xs")
+    if "datr" not in required_present and "sb" not in required_present:
+        missing_required.extend(["datr", "sb"])
+
+    dropped = len(payload.cookies) - len(normalized)
+    if not normalized or missing_required:
+        LOGGER.warning(
+            "Cookie import rejected for account %s. Missing required: %s",
+            account_id,
+            missing_required,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "status": "error",
+                "detected_format": detected_format,
+                "cookies_received": len(payload.cookies),
+                "cookies_kept": len(normalized),
+                "cookies_dropped": dropped,
+                "required_present": required_present,
+                "missing_required": missing_required,
+            },
+        )
+
+    async with SessionLocal() as session:
+        account = await session.scalar(select(Account).where(Account.id == account_id))
+        if not account:
+            raise HTTPException(status_code=404, detail="Аккаунт не найден")
+        account.cookies = normalized
+        if account.status == AccountStatus.COOKIE_INVALID:
+            account.status = AccountStatus.ACTIVE
+        session.add(account)
+        await session.commit()
+
+    return {
+        "status": "ok",
+        "detected_format": detected_format,
+        "cookies_received": len(payload.cookies),
+        "cookies_kept": len(normalized),
+        "cookies_dropped": dropped,
+        "required_present": required_present,
+        "missing_required": [],
     }
 
 

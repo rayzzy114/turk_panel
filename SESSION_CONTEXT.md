@@ -48,7 +48,8 @@ Stores one warmup session:
 
 ### Enums
 
-- `AccountStatus`: `active`, `banned`, `shadow_banned`, `checkpoint`, `captcha_blocked`
+- `AccountStatus`: includes `active`, `banned`, `error`, `checkpoint`, `cookie_invalid`
+- Legacy statuses like `shadow_banned`, `captcha_blocked`, and `invalid_credentials` still exist in code/UI for backward compatibility and older flows.
 - `CheckpointType`: `code_verification`, `face_verification`, `suspicious_login`, `account_disabled`, `unknown_checkpoint`
 
 ## Migration Pattern
@@ -86,6 +87,27 @@ Stores one warmup session:
   - `login:password:email:email_password`
   - Turkish shop format: `facebook giriş: ... şifre: ... mail: ... mail şifre: ...`
 - `POST /api/accounts/import` returns per-line results plus summary.
+
+### Cookie normalization and Dolphin imports
+
+- `import_data.py` now owns the single cookie normalization entry point: `normalize_cookies()`.
+- Supported auto-detection:
+  - Dolphin/Chrome extension JSON via `expirationDate`
+  - Playwright-style cookies via `expires`
+- Normalization rules:
+  - keep only `facebook.com` cookies
+  - convert Dolphin `expirationDate` -> Playwright `expires`
+  - normalize `sameSite` values
+- Runtime restore order in `worker.py`:
+  1. `storage_state`
+  2. normalized `cookies`
+  3. login/password fallback only if password is real
+- If restore fails and password is the cookie placeholder `__COOKIE_ONLY__`, the account is marked `cookie_invalid` and operator should re-import fresh Dolphin cookies.
+- API endpoint for per-account cookie refresh:
+  - `POST /api/accounts/{account_id}/cookies`
+  - validates required `c_user`, `xs`, and at least one of `datr`/`sb`
+  - returns detected format and kept/dropped counts
+- UI now exposes a cookie import modal per account, and `cookie_invalid` status includes a direct re-import affordance.
 
 ### Mobile proxies
 
@@ -145,6 +167,7 @@ Endpoints that changed recently and are likely relevant:
 - `POST /api/accounts/{account_id}/warmup`
 - `GET /api/accounts/{account_id}/warmup/logs`
 - `POST /api/accounts/import`
+- `POST /api/accounts/{account_id}/cookies`
 - `POST /api/accounts/{account_id}/rotate-ip`
 - account list/create/update flows now include checkpoint/proxy metadata
 

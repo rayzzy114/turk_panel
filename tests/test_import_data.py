@@ -141,6 +141,199 @@ def test_parse_account_text_supports_dolphin_json_format() -> None:
     assert result.cookies[0]["name"] == "c_user"
 
 
+def test_convert_dolphin_cookies_filters_non_facebook() -> None:
+    from import_data import convert_dolphin_cookies
+
+    raw = [
+        {
+            "name": "c_user",
+            "value": "123",
+            "domain": ".facebook.com",
+            "path": "/",
+            "expirationDate": 1804288039.503868,
+            "session": False,
+            "httpOnly": True,
+            "secure": True,
+            "sameSite": "no_restriction",
+        },
+        {
+            "name": "nid",
+            "value": "google",
+            "domain": ".google.com",
+            "path": "/",
+            "expirationDate": 1804288039.503868,
+        },
+    ]
+
+    result = convert_dolphin_cookies(raw)
+
+    assert result == [
+        {
+            "name": "c_user",
+            "value": "123",
+            "domain": ".facebook.com",
+            "path": "/",
+            "expires": 1804288039,
+            "httpOnly": True,
+            "secure": True,
+            "sameSite": "None",
+        }
+    ]
+
+
+def test_convert_dolphin_cookies_normalizes_samesite() -> None:
+    from import_data import convert_dolphin_cookies
+
+    raw = [
+        {
+            "name": "a",
+            "value": "1",
+            "domain": ".facebook.com",
+            "path": "/",
+            "expirationDate": 10.5,
+            "sameSite": "no_restriction",
+        },
+        {
+            "name": "b",
+            "value": "2",
+            "domain": ".facebook.com",
+            "path": "/",
+            "expirationDate": 11.5,
+            "sameSite": "lax",
+        },
+        {
+            "name": "c",
+            "value": "3",
+            "domain": ".facebook.com",
+            "path": "/",
+            "expirationDate": 12.5,
+            "sameSite": "strict",
+        },
+    ]
+
+    result = convert_dolphin_cookies(raw)
+
+    assert [cookie["sameSite"] for cookie in result] == ["None", "Lax", "Strict"]
+
+
+def test_convert_dolphin_cookies_converts_expiration_date() -> None:
+    from import_data import convert_dolphin_cookies
+
+    raw = [
+        {
+            "name": "persisted",
+            "value": "1",
+            "domain": ".facebook.com",
+            "path": "/",
+            "expirationDate": 1804288039.903868,
+            "session": False,
+        },
+        {
+            "name": "session_cookie",
+            "value": "2",
+            "domain": ".facebook.com",
+            "path": "/",
+            "session": True,
+        },
+    ]
+
+    result = convert_dolphin_cookies(raw)
+
+    assert result[0]["expires"] == 1804288039
+    assert result[1]["expires"] == -1
+
+
+def test_detect_cookie_format_dolphin() -> None:
+    from import_data import detect_cookie_format
+
+    raw = [{"name": "xs", "expirationDate": 1.0}]
+
+    assert detect_cookie_format(raw) == "dolphin"
+
+
+def test_detect_cookie_format_playwright() -> None:
+    from import_data import detect_cookie_format
+
+    raw = [{"name": "xs", "expires": 1}]
+
+    assert detect_cookie_format(raw) == "playwright"
+
+
+def test_normalize_cookies_passthrough_playwright() -> None:
+    from import_data import normalize_cookies
+
+    raw = [
+        {
+            "name": "xs",
+            "value": "abc",
+            "domain": ".facebook.com",
+            "path": "/",
+            "expires": 1,
+            "sameSite": "None",
+        },
+        {
+            "name": "nid",
+            "value": "skip",
+            "domain": ".google.com",
+            "path": "/",
+            "expires": 1,
+            "sameSite": "Lax",
+        },
+    ]
+
+    assert normalize_cookies(raw) == [raw[0]]
+
+
+def test_normalize_cookies_auto_converts_dolphin() -> None:
+    from import_data import normalize_cookies
+
+    raw = [
+        {
+            "name": "xs",
+            "value": "abc",
+            "domain": ".facebook.com",
+            "path": "/",
+            "expirationDate": 1804288039.5,
+            "sameSite": "no_restriction",
+        }
+    ]
+
+    assert normalize_cookies(raw) == [
+        {
+            "name": "xs",
+            "value": "abc",
+            "domain": ".facebook.com",
+            "path": "/",
+            "expires": 1804288039,
+            "httpOnly": False,
+            "secure": False,
+            "sameSite": "None",
+        }
+    ]
+
+
+def test_convert_dolphin_cookies_empty_input() -> None:
+    from import_data import convert_dolphin_cookies
+
+    assert convert_dolphin_cookies([]) == []
+
+
+def test_convert_dolphin_cookies_missing_expiration() -> None:
+    from import_data import convert_dolphin_cookies
+
+    raw = [{"name": "xs", "value": "abc", "domain": ".facebook.com", "path": "/"}]
+
+    result = convert_dolphin_cookies(raw)
+
+    assert result[0]["expires"] == -1
+
+
+def test_normalize_samesite_unknown_value() -> None:
+    from import_data import _normalize_samesite
+
+    assert _normalize_samesite("weird") == "Lax"
+
+
 def test_detect_gender_supports_male_female_and_any() -> None:
     from import_data import detect_gender
 
